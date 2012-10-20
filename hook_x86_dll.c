@@ -35,17 +35,14 @@ hwnd_proc_node* hwnd_proc_find(HWND hwnd)
   return 0;
 }
 
-LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR data)
 {
   if(msg == WM_MOVE)
   {
     log("WNDPROC: WM_MOVE\n");
   }
 
-  hwnd_proc_node* node = hwnd_proc_find(hwnd);
-  if(node != 0) return CallWindowProc(node->fproc, hwnd, msg, wparam, lparam);
-
-  return 0;
+  return DefSubclassProc(hwnd, msg, wparam, lparam);
 }
 
 DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wparam, LPARAM lparam)
@@ -59,16 +56,12 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wparam, LPARAM lparam)
   if(msg == WM_ENTERSIZEMOVE)
   {
     log("WM_ENTERSIZEMOVE\n");
-    if(hwnd_proc_find(hwnd) == 0)
+    hwnd_proc_node* node;
+    if(hwnd_proc_find(hwnd) == 0 && (node = hwnd_proc_find(0)) != 0)
     {
-      hwnd_proc_node* node = hwnd_proc_find(0);
-      if(node != 0)
-      {
-        node->hwnd = hwnd;
-        node->fproc = (WNDPROC)GetWindowLongPtr(hwnd, GWLP_WNDPROC);
-        log("install wndproc: %08X / %08X -> %08X\n", node->hwnd, node->fproc, fproc);
-        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)fproc);
-      }
+      node->hwnd = hwnd;
+      log("install subclass: %08X / %08X\n", hwnd, fproc);
+      SetWindowSubclass(hwnd, fproc, 0, 0);
     }
   }
   if(msg == WM_EXITSIZEMOVE)
@@ -77,10 +70,9 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wparam, LPARAM lparam)
     hwnd_proc_node* node = hwnd_proc_find(hwnd);
     if(node != 0)
     {
-      log("uninstall wndproc: %08X / %08X -> %08X\n", node->hwnd, fproc, node->fproc);
-      SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)node->fproc);
+      log("uninstall subclass: %08X\n", hwnd);
+      RemoveWindowSubclass(hwnd, fproc, 0);
       node->hwnd = 0;
-      node->fproc = 0;
     }
   }
   if(msg == WM_SYSCOMMAND)
