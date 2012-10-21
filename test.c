@@ -28,6 +28,6 @@
 void main()
 {
   install();
-  MessageBox(0, "snapit-test", "button to exit", MB_OK);
+  MessageBox(0, "Exit?", "Test", MB_OK);
   uninstall();
 }

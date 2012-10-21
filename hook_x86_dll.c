@@ -33,16 +33,16 @@
 
 #define DLL_EXPORT __declspec(dllexport)
 
-#define DX 32
-#define DY 32
+#define DX 16
+#define DY 16
 
 HHOOK hhook_g = 0;
 HINSTANCE hinst_g = 0;
 
-void _log_(const char* fmt, ...)
-{
-  return;
+#define _log_
 
+/*void _log_(const char* fmt, ...)
+{
   FILE* file = fopen("d:/out.txt", "a+");
   if(!file) return;
 
@@ -52,7 +52,7 @@ void _log_(const char* fmt, ...)
   va_end( arglist );
 
   fclose(file);
-}
+}*/ // _log_
 
 HWND hwnd_g = 0;
 
@@ -67,8 +67,10 @@ BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
   if(hwnd == hwnd_g || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, &rect)) return TRUE;
   rects[rects_n++] = rect;
 
+//  if(lp == 0) EnumChildWindows(hwnd, fenum, 1)
+
   return TRUE;
-}
+} // fenum
 
 LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data)
 {
@@ -82,14 +84,17 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
   RECT rect; // current window position
   if(!GetWindowRect(hwnd, &rect)) goto ret;
 
+  // next windown position
   int l = pos->x, r = pos->x + pos->cx, t = pos->y, b = pos->y + pos->cy;
 
+  // distance to closest window border
   int dl = INT_MAX, dr = INT_MAX, dt = INT_MAX, db = INT_MAX;
   int i; for(i = 0; i < rects_n; i++)
   {
-    RECT* rect_ = &rects[i];
+    RECT* rect_ = rects + i;
     int l_ = rect_->left, r_ = rect_->right, t_ = rect_->top, b_ = rect_->bottom;
 
+    // don't snap to left/right border cont.
     if(t < b_ + DY && b > t_ - DY)
     {
       int dl_ = l_ - l; if(abs(dl_) < abs(dl)) dl = dl_;
@@ -98,6 +103,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
           dr_ = r_ - r; if(abs(dr_) < abs(dr)) dr = dr_;
     }
 
+    // don't snap to top/bottom border cont.
     if(l < r_ + DX && r > l_ - DX)
     {
       int dt_ = t_ - t; if(abs(dt_) < abs(dt)) dt = dt_;
@@ -114,25 +120,29 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
   {
     int dx = dl;
     if(abs(dr) < abs(dx)) dx = dr;
+    if(abs(dx) < DX) pos->x = l + dx;
+
     int dy = dt;
     if(abs(db) < abs(dy)) dy = db;
-
-    if(abs(dx) < DX) pos->x = l + dx;
     if(abs(dy) < DY) pos->y = t + dy;
   }
   else if(!(pos->flags & SWP_NOSIZE))
   {
-    if(pos->cx != (r - l))
+    if(pos->cx != (rect.right - rect.left))
     {
+           if(pos->x == rect.left            && abs(dr) < DX && r - l + dr > 0) { pos->cx = r - l + dr; }
+      else if(pos->x == rect.right - pos->cx && abs(dl) < DX && r - l - dl > 0) { pos->cx = r - l - dl; pos->x = l + dl; }
     }
-    if(pos->cy != (b - t))
+    if(pos->cy != (rect.bottom - rect.top))
     {
+           if(pos->y == rect.top              && abs(db) < DY && b - t + db > 0) { pos->cy = b - t + db; }
+      else if(pos->y == rect.bottom - pos->cy && abs(dt) < DY && b - t - dt > 0) { pos->cy = b - t - dt; pos->y = t + dt; }
     }
   }
 
   ret:
   return DefSubclassProc(hwnd, msg, wp, lp);
-}
+} // fproc
 
 DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 {
@@ -164,7 +174,7 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 
   ret:
   return CallNextHookEx(hhook_g, code, wp, lp);
-}
+} // fhook
 
 DLL_EXPORT int install()
 {
@@ -175,7 +185,7 @@ DLL_EXPORT int install()
   if(!hhook_g) return -1;
 
   return 0;
-}
+} // install
 
 DLL_EXPORT int uninstall()
 {
@@ -193,7 +203,7 @@ DLL_EXPORT int uninstall()
     hhook_g = 0;
     return 0;
   }
-}
+} // uninstall
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
@@ -215,4 +225,4 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   }
 
   return TRUE;
-}
+} // DllMain
