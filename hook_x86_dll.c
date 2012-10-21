@@ -39,9 +39,9 @@
 HHOOK hhook_g = 0;
 HINSTANCE hinst_g = 0;
 
-#define _log_
+#define _log_ flog
 
-/*void _log_(const char* fmt, ...)
+void flog(const char* fmt, ...)
 {
   FILE* file = fopen("d:/out.txt", "a+");
   if(!file) return;
@@ -52,7 +52,7 @@ HINSTANCE hinst_g = 0;
   va_end( arglist );
 
   fclose(file);
-}*/ // _log_
+} // flog
 
 HWND hwnd_g = 0;
 
@@ -176,7 +176,7 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
   return CallNextHookEx(hhook_g, code, wp, lp);
 } // fhook
 
-DLL_EXPORT int install()
+DLL_EXPORT int hook_install()
 {
   _log_("set hook ...\n");
 
@@ -187,7 +187,7 @@ DLL_EXPORT int install()
   return 0;
 } // install
 
-DLL_EXPORT int uninstall()
+DLL_EXPORT int hook_uninstall()
 {
   if(!hhook_g) return 0;
 
@@ -221,7 +221,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 
     if(hwnd_g) RemoveWindowSubclass(hwnd_g, fproc, 0);
 
-    uninstall();
+    hook_uninstall();
   }
 
   return TRUE;

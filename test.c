@@ -27,7 +27,7 @@
 
 void main()
 {
-  install();
+  hook_install();
   MessageBox(0, "Exit?", "Test", MB_OK);
-  uninstall();
+  hook_uninstall();
 }
