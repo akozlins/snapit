@@ -1,17 +1,24 @@
 
 #include <stdio.h>
+#include <math.h>
+#include <limits.h>
 
+#define STRICT 1
+#define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
 
 #define DLL_EXPORT __declspec(dllexport)
 
+#define DX 32
+#define DY 32
+
 HHOOK hhook = 0;
 HINSTANCE hinst_ = 0;
 
-void log(const char* fmt, ...)
+void _log_(const char* fmt, ...)
 {
   FILE* file = fopen("d:/out.txt", "a+");
-  if(file == 0) return;
+  if(!file) return;
 
   va_list list;
   va_start(list, fmt);
@@ -23,112 +30,105 @@ void log(const char* fmt, ...)
 
 typedef struct {
   HWND hwnd;
-  WNDPROC fproc;
-} hwnd_proc_node;
+//  WNDPROC fproc;
+  RECT rect;
+  RECT rect_d;
+} wnd_node;
 
-hwnd_proc_node hwnd_proc[16] = { 0 };
+wnd_node wnds[16] = { 0 };
 
-hwnd_proc_node* hwnd_proc_find(HWND hwnd)
+wnd_node* wnd_find(HWND hwnd)
 {
-  int i;
-  for(i = 0; i < 16; i++) if(hwnd_proc[i].hwnd == hwnd) return &hwnd_proc[i];
+  int i; for(i = 0; i < 16; i++) if(wnds[i].hwnd == hwnd) return &wnds[i];
   return 0;
 }
 
-LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR data)
+LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data)
 {
-  if(msg == WM_MOVE)
-  {
-    log("WNDPROC: WM_MOVE\n");
-  }
+  if(msg != WM_WINDOWPOSCHANGING) goto ret;
+  _log_("fproc: msg = WM_WINDOWPOSCHANGING\n");
 
-  return DefSubclassProc(hwnd, msg, wparam, lparam);
+  ret:
+  return DefSubclassProc(hwnd, msg, wp, lp);
 }
 
-DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wparam, LPARAM lparam)
+DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 {
-  if(code < 0 || wparam != 0 || lparam == 0) goto ret;
+  if(code < 0 || wp != 0 || lp == 0) goto ret;
 
-  PCWPSTRUCT cwp = (PCWPSTRUCT)lparam;
+  PCWPSTRUCT cwp = (PCWPSTRUCT)lp;
   HWND hwnd = cwp->hwnd;
-  UINT msg = cwp->message;
 
-  if(msg == WM_ENTERSIZEMOVE)
+  wnd_node* node;
+  switch(cwp->message)
   {
-    log("WM_ENTERSIZEMOVE\n");
-    hwnd_proc_node* node;
-    if(hwnd_proc_find(hwnd) == 0 && (node = hwnd_proc_find(0)) != 0)
-    {
-      node->hwnd = hwnd;
-      log("install subclass: %08X / %08X\n", hwnd, fproc);
-      SetWindowSubclass(hwnd, fproc, 0, 0);
-    }
-  }
-  if(msg == WM_EXITSIZEMOVE)
-  {
-    log("WM_EXITSIZEMOVE\n");
-    hwnd_proc_node* node = hwnd_proc_find(hwnd);
-    if(node != 0)
-    {
-      log("uninstall subclass: %08X\n", hwnd);
-      RemoveWindowSubclass(hwnd, fproc, 0);
-      node->hwnd = 0;
-    }
-  }
-  if(msg == WM_SYSCOMMAND)
-  {
-    log("WM_SYSCOMMAND\n");
-    log("w = %08X / l = %08X\n", cwp->wParam, cwp->lParam);
-    int x = cwp->lParam & 0xFFFF;
-    int y = cwp->lParam >> 16;
-    switch(cwp->wParam & 0xFFF0)
-    {
-    case SC_MOVE:
-      break;
-    case SC_SIZE:
-      break;
-    default:
-      printf("");
-    }
+  case WM_ENTERSIZEMOVE:
+    _log_("fhook: msg = WM_ENTERSIZEMOVE\n");
+    if(wnd_find(hwnd) || !(node = wnd_find(0))) break;
+
+    node->hwnd = hwnd;
+    _log_("  set subclass: hwnd = %08X, fproc = %08X\n", hwnd, fproc);
+    SetWindowSubclass(hwnd, fproc, 0, 0);
+    break;
+  case WM_EXITSIZEMOVE:
+    _log_("fhook: msg = WM_EXITSIZEMOVE\n");
+    if(!(node = wnd_find(hwnd))) break;
+
+    _log_("  remove subclass: hwnd = %08X\n, fproc = %08X", hwnd, fproc);
+    RemoveWindowSubclass(hwnd, fproc, 0);
+    memset(node, 0, sizeof(wnd_node));
+    break;
   }
 
   ret:
-  return CallNextHookEx(hhook, code, wparam, lparam);
+  return CallNextHookEx(hhook, code, wp, lp);
 }
 
 DLL_EXPORT int install()
 {
-  log("install hook\n");
+  _log_("set hook ...\n");
+
   hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, hinst_, 0);
-  if(hhook == 0) return -1;
+  _log_("  hhook = %08X\n", hhook);
+  if(!hhook) return -1;
+
   return 0;
 }
 
 DLL_EXPORT int uninstall()
 {
-  if(hhook == 0) return -1;
+  if(!hhook) return 0;
 
-  log("uninstall hook\n");
-  if(UnhookWindowsHookEx(hhook) != 0)
+  _log_("remove hook ...\n");
+  if(!UnhookWindowsHookEx(hhook))
   {
+    _log_("  fail\n");
+    return -1;
+  }
+  else
+  {
+    _log_("  success\n");
     hhook = 0;
     return 0;
   }
-  return -1;
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
   if(reason == DLL_PROCESS_ATTACH)
   {
+    _log_("DLL_PROCESS_ATTACH :: hinst = %08X\n", hinst);
+
     hinst_ = hinst;
     DisableThreadLibraryCalls(hinst);
-
-    log("DLL_PROCESS_ATTACH / %08X\n", hinst);
   }
 
   if(reason == DLL_PROCESS_DETACH)
   {
+    _log_("DLL_PROCESS_DETACH :: hinst = %08X\n", hinst);
+
+    int i; for(i = 0; i < 16; i++) if(wnds[i].hwnd) RemoveWindowSubclass(wnds[i].hwnd, fproc, 0);
+
     uninstall();
   }
 
