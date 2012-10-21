@@ -1,3 +1,27 @@
+/*
+ * This file is part of 'snapit' program.
+ *
+ * Copyright (c) 2012 Alexandr Kozlinskiy
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
 
 #include <stdio.h>
 #include <math.h>
@@ -12,8 +36,8 @@
 #define DX 32
 #define DY 32
 
-HHOOK hhook = 0;
-HINSTANCE hinst_ = 0;
+HHOOK hhook_g = 0;
+HINSTANCE hinst_g = 0;
 
 void _log_(const char* fmt, ...)
 {
@@ -30,105 +54,80 @@ void _log_(const char* fmt, ...)
   fclose(file);
 }
 
-typedef struct {
-  HWND hwnd;
-//  WNDPROC fproc;
-  int l, r, t, b;
-  int dl, dr, dt, db;
-} wnd_node;
+HWND hwnd_g = 0;
 
-wnd_node wnds[16] = { 0 };
-
-wnd_node* wnd_find(HWND hwnd)
-{
-  int i; for(i = 0; i < 16; i++) if(wnds[i].hwnd == hwnd) return &wnds[i];
-  return 0;
-}
+size_t rects_n = 0;
+RECT rects[64];
 
 BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
 {
-  wnd_node* node = wnds + lp;
+  if(rects_n == 64) return FALSE;
+
   RECT rect;
-  if(hwnd == node->hwnd || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, &rect)) return TRUE;
-
-  if(node->t < rect.bottom + DY && node->b > rect.top - DY)
-  {
-    int dl = rect.left - node->l;
-    if(abs(dl) < abs(node->dl)) node->dl = dl;
-    dl = rect.right - node->l;
-    if(abs(dl) < abs(node->dl)) node->dl = dl;
-
-    int dr = rect.left - node->r;
-    if(abs(dr) < abs(node->dr)) node->dr = dr;
-    dr = rect.right - node->r;
-    if(abs(dr) < abs(node->dr)) node->dr = dr;
-  }
-
-  if(node->l < rect.right + DX && node->r > rect.left - DX)
-  {
-    int dt = rect.top - node->t;
-    if(abs(dt) < abs(node->dt)) node->dt = dt;
-    dt = rect.bottom - node->t;
-    if(abs(dt) < abs(node->dt)) node->dt = dt;
-
-    int db = rect.top - node->b;
-    if(abs(db) < abs(node->db)) node->db = db;
-    db = rect.bottom - node->b;
-    if(abs(db) < abs(node->db)) node->db = db;
-  }
+  if(hwnd == hwnd_g || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, &rect)) return TRUE;
+  rects[rects_n++] = rect;
 
   return TRUE;
 }
 
 LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data)
 {
-  switch(msg)
+  if(msg != WM_WINDOWPOSCHANGING) goto ret;
+  _log_("fproc: msg = WM_WINDOWPOSCHANGING\n");
+
+  PWINDOWPOS pos = (PWINDOWPOS)lp;
+  if(pos->flags & SWP_NOMOVE && pos->flags & SWP_NOSIZE) goto ret;
+  _log_("  x = %d, y = %d, w = %d, h = %d\n", pos->x, pos->y, pos->cx, pos->cy);
+
+  RECT rect; // current window position
+  if(!GetWindowRect(hwnd, &rect)) goto ret;
+
+  int l = pos->x, r = pos->x + pos->cx, t = pos->y, b = pos->y + pos->cy;
+
+  int dl = INT_MAX, dr = INT_MAX, dt = INT_MAX, db = INT_MAX;
+  int i; for(i = 0; i < rects_n; i++)
   {
-  case WM_WINDOWPOSCHANGING:
-    _log_("fproc: msg = WM_WINDOWPOSCHANGING\n");
+    RECT* rect_ = &rects[i];
+    int l_ = rect_->left, r_ = rect_->right, t_ = rect_->top, b_ = rect_->bottom;
 
-    PWINDOWPOS pos = (PWINDOWPOS)lp;
-    if(pos->flags & SWP_NOMOVE && pos->flags & SWP_NOSIZE) break;
-    _log_("  x = %d, y = %d, w = %d, h = %d\n", pos->x, pos->y, pos->cx, pos->cy);
-
-    RECT rect; // current window position
-    if(!GetWindowRect(hwnd, &rect)) break;
-
-    wnd_node* node = wnd_find(hwnd);
-    if(!node) break;
-
-    node->l = pos->x;
-    node->r = pos->x + pos->cx;
-    node->t = pos->y;
-    node->b = pos->y + pos->cy;
-
-    node->dl = node->dr = node->dt = node->db = INT_MAX;
-    EnumWindows(fenum, node - wnds);
-    _log_("  dl = %d, dr = %d, dt = %d, db = %d\n", node->dl, node->dr, node->dt, node->db);
-
-    if(!(pos->flags & SWP_NOMOVE) &&
-      pos->cx == (rect.right - rect.left) && pos->cy == (rect.bottom - rect.top) &&
-      (pos->x != rect.left || pos->y != rect.top))
+    if(t < b_ + DY && b > t_ - DY)
     {
-      int dx = node->dl;
-      if(abs(node->dr) < abs(dx)) dx = node->dr;
-      int dy = node->dt;
-      if(abs(node->db) < abs(dy)) dy = node->db;
-
-      if(abs(dx) < DX) pos->x = node->l + dx;
-      if(abs(dy) < DY) pos->y = node->t + dy;
-    }
-    else if(!(pos->flags & SWP_NOSIZE))
-    {
-      if(pos->cx != (node->r - node->l))
-      {
-      }
-      if(pos->cy != (node->b - node->t))
-      {
-      }
+      int dl_ = l_ - l; if(abs(dl_) < abs(dl)) dl = dl_;
+          dl_ = r_ - l; if(abs(dl_) < abs(dl)) dl = dl_;
+      int dr_ = l_ - r; if(abs(dr_) < abs(dr)) dr = dr_;
+          dr_ = r_ - r; if(abs(dr_) < abs(dr)) dr = dr_;
     }
 
-    break;
+    if(l < r_ + DX && r > l_ - DX)
+    {
+      int dt_ = t_ - t; if(abs(dt_) < abs(dt)) dt = dt_;
+          dt_ = b_ - t; if(abs(dt_) < abs(dt)) dt = dt_;
+      int db_ = t_ - b; if(abs(db_) < abs(db)) db = db_;
+          db_ = b_ - b; if(abs(db_) < abs(db)) db = db_;
+    }
+  }
+  _log_("  dl = %d, dr = %d, dt = %d, db = %d\n", dl, dr, dt, db);
+
+  if(!(pos->flags & SWP_NOMOVE) &&
+    pos->cx == (rect.right - rect.left) && pos->cy == (rect.bottom - rect.top) &&
+    (pos->x != rect.left || pos->y != rect.top))
+  {
+    int dx = dl;
+    if(abs(dr) < abs(dx)) dx = dr;
+    int dy = dt;
+    if(abs(db) < abs(dy)) dy = db;
+
+    if(abs(dx) < DX) pos->x = l + dx;
+    if(abs(dy) < DY) pos->y = t + dy;
+  }
+  else if(!(pos->flags & SWP_NOSIZE))
+  {
+    if(pos->cx != (r - l))
+    {
+    }
+    if(pos->cy != (b - t))
+    {
+    }
   }
 
   ret:
@@ -142,48 +141,48 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
   PCWPSTRUCT cwp = (PCWPSTRUCT)lp;
   HWND hwnd = cwp->hwnd;
 
-  wnd_node* node;
   switch(cwp->message)
   {
   case WM_ENTERSIZEMOVE:
     _log_("fhook: msg = WM_ENTERSIZEMOVE\n");
-    if(wnd_find(hwnd) || !(node = wnd_find(0))) break;
-
-    node->hwnd = hwnd;
+    if(hwnd_g) break;
     _log_("  set subclass: hwnd = %08X, fproc = %08X\n", hwnd, fproc);
-    SetWindowSubclass(hwnd, fproc, 0, 0);
+    if(SetWindowSubclass(hwnd, fproc, 0, 0))
+    {
+      hwnd_g = hwnd;
+      rects_n = 0;
+      EnumWindows(fenum, 0);
+    }
     break;
   case WM_EXITSIZEMOVE:
     _log_("fhook: msg = WM_EXITSIZEMOVE\n");
-    if(!(node = wnd_find(hwnd))) break;
-
+    if(!hwnd_g) break;
     _log_("  remove subclass: hwnd = %08X, fproc = %08X\n", hwnd, fproc);
-    RemoveWindowSubclass(hwnd, fproc, 0);
-    memset(node, 0, sizeof(wnd_node));
+    if(RemoveWindowSubclass(hwnd, fproc, 0)) hwnd_g = 0;
     break;
   }
 
   ret:
-  return CallNextHookEx(hhook, code, wp, lp);
+  return CallNextHookEx(hhook_g, code, wp, lp);
 }
 
 DLL_EXPORT int install()
 {
   _log_("set hook ...\n");
 
-  hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, hinst_, 0);
-  _log_("  hhook = %08X\n", hhook);
-  if(!hhook) return -1;
+  hhook_g = SetWindowsHookEx(WH_CALLWNDPROC, fhook, hinst_g, 0);
+  _log_("  hhook = %08X\n", hhook_g);
+  if(!hhook_g) return -1;
 
   return 0;
 }
 
 DLL_EXPORT int uninstall()
 {
-  if(!hhook) return 0;
+  if(!hhook_g) return 0;
 
   _log_("remove hook ...\n");
-  if(!UnhookWindowsHookEx(hhook))
+  if(!UnhookWindowsHookEx(hhook_g))
   {
     _log_("  fail\n");
     return -1;
@@ -191,7 +190,7 @@ DLL_EXPORT int uninstall()
   else
   {
     _log_("  success\n");
-    hhook = 0;
+    hhook_g = 0;
     return 0;
   }
 }
@@ -202,7 +201,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   {
     _log_("DLL_PROCESS_ATTACH :: hinst = %08X\n", hinst);
 
-    hinst_ = hinst;
+    hinst_g = hinst;
     DisableThreadLibraryCalls(hinst);
   }
 
@@ -210,7 +209,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   {
     _log_("DLL_PROCESS_DETACH :: hinst = %08X\n", hinst);
 
-    int i; for(i = 0; i < 16; i++) if(wnds[i].hwnd) RemoveWindowSubclass(wnds[i].hwnd, fproc, 0);
+    if(hwnd_g) RemoveWindowSubclass(hwnd_g, fproc, 0);
 
     uninstall();
   }
