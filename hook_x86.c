@@ -37,7 +37,11 @@
 #define DX 16
 #define DY 16
 
+#pragma data_seg(".sdata")
 HHOOK g_hhook = 0;
+#pragma data_seg()
+#pragma comment(linker, "/section:.sdata,rws")
+
 HINSTANCE g_hinst = 0;
 
 #define _log_ flog
@@ -207,11 +211,10 @@ DLL_EXPORT int hook_install()
 {
   _log_("set hook ...\n");
 
-  g_hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, g_hinst, 0);
+  if(!g_hhook) g_hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, g_hinst, 0);
   _log_("  hhook = %08X\n", g_hhook);
-  if(!g_hhook) return -1;
 
-  return 0;
+  return (g_hhook ? 0 : -1);
 } // install
 
 DLL_EXPORT int hook_uninstall()
@@ -219,16 +222,16 @@ DLL_EXPORT int hook_uninstall()
   if(!g_hhook) return 0;
 
   _log_("remove hook ...\n");
-  if(!UnhookWindowsHookEx(g_hhook))
+  if(UnhookWindowsHookEx(g_hhook))
   {
-    _log_("  FAIL\n");
-    return -1;
+    g_hhook = 0;
+    _log_("  OK\n");
+    return 0;
   }
   else
   {
-    _log_("  OK\n");
-    g_hhook = 0;
-    return 0;
+    _log_("  FAIL\n");
+    return -1;
   }
 } // uninstall
 
@@ -251,8 +254,6 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   if(reason == DLL_PROCESS_DETACH)
   {
     _log_("  DLL_PROCESS_DETACH\n");
-
-    hook_uninstall();
   }
 
   return TRUE;
