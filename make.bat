@@ -1,11 +1,17 @@
 
-@echo "make hook_x86.dll ..."
-"c:/develop/tcc/tiny_impdef" comctl32.dll -o comctl32.def
-"c:/develop/tcc/tcc" -shared -L. -lcomctl32 -o hook_x86.dll hook_x86_dll.c
+call "C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\vcvarsall.bat"
 
-@echo "make service_x86.exe ..."
-"c:/develop/tcc/tiny_impdef" advapi32.dll -o advapi32.def
-"c:/develop/tcc/tcc" -luser32 -L. -ladvapi32 -lhook_x86 -o service_x86.exe service_x86_exe.c
+@set CLOPTS=/nologo /W3 /MD /c /O1 /EHa /D "NDEBUG" /D "WIN32"
+@set LINKOPTS=/nologo /RELEASE /INCREMENTAL:NO /OPT:REF /OPT:ICF /NODEFAULTLIB msvcrt.lib kernel32.lib
+@rem /SUBSYSTEM:WINDOWS /MACHINE:X86
 
-@echo "make test.exe ..."
-"c:/develop/tcc/tcc" -luser32 -L. -lhook_x86 -o test.exe test.c
+cl %CLOPTS% /Tp hook_x86.c
+link %LINKOPTS% user32.lib comctl32.lib psapi.lib /DLL /out:hook_x86.dll hook_x86.obj
+
+cl %CLOPTS% /Tp snapit_x86.c
+link %LINKOPTS% hook_x86.lib /out:snapit_x86.exe snapit_x86.obj
+
+rem "c:/develop/tcc/tiny_impdef" comctl32.dll -o comctl32.def
+rem "c:/develop/tcc/tcc" -shared -L. -lcomctl32 -o hook_x86.dll hook_x86.c
+
+rem "c:/develop/tcc/tcc" -L. -lhook_x86 -o snapit_x86.exe snapit_x86.c

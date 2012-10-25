@@ -24,74 +24,90 @@
  */
 
 #include <stdio.h>
-#include <math.h>
-#include <limits.h>
+#include <stdlib.h>
 
 #define STRICT 1
 #define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
+#include <commctrl.h>
+#include <psapi.h>
 
 #define DLL_EXPORT __declspec(dllexport)
 
 #define DX 16
 #define DY 16
 
-HHOOK hhook_g = 0;
-HINSTANCE hinst_g = 0;
+HHOOK g_hhook = 0;
+HINSTANCE g_hinst = 0;
 
 #define _log_ flog
 
 void flog(const char* fmt, ...)
 {
+#pragma warning(push)
+#pragma warning( disable : 4996 )
   FILE* file = fopen("d:/out.txt", "a+");
+#pragma warning(pop)
   if(!file) return;
 
   va_list list;
   va_start(list, fmt);
   vfprintf(file, fmt, list);
-  va_end( arglist );
+  va_end(list);
 
   fclose(file);
 } // flog
 
-HWND hwnd_g = 0;
-
-size_t rects_n = 0;
-RECT rects[64];
+typedef struct {
+  HWND hwnd;
+  RECT rect_list[64];
+  int rect_list_n;
+} STATE;
 
 BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
 {
-  if(rects_n == 64) return FALSE;
+  STATE* state = (STATE*)lp;
+
+  if(state->rect_list_n == 64) return FALSE;
+
+  if(hwnd == state->hwnd ||
+    !IsWindowVisible(hwnd) ||
+    IsIconic(hwnd) ||
+    (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD)) return TRUE;
 
   RECT rect;
-  if(hwnd == hwnd_g || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, &rect)) return TRUE;
-  rects[rects_n++] = rect;
+  if(!GetWindowRect(hwnd, &rect)) return TRUE;
+  state->rect_list[state->rect_list_n++] = rect;
+
+/*  HRGN hrgn = CreateRectRgn(0, 0, 0, 0);
+  if(GetWindowRgn(hwnd, hrgn) != ERROR)
+  {
+    GetRgnBox()
+    CombineRgn()
+  }
+  DeleteObject(hrgn);*/
 
 //  if(lp == 0) EnumChildWindows(hwnd, fenum, 1)
 
   return TRUE;
 } // fenum
 
-LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data)
+void fposchanging(STATE* state, PWINDOWPOS pos)
 {
-  if(msg != WM_WINDOWPOSCHANGING) goto ret;
-  _log_("fproc: msg = WM_WINDOWPOSCHANGING\n");
-
-  PWINDOWPOS pos = (PWINDOWPOS)lp;
-  if(pos->flags & SWP_NOMOVE && pos->flags & SWP_NOSIZE) goto ret;
+  if(pos->flags & SWP_NOMOVE && pos->flags & SWP_NOSIZE) return;
   _log_("  x = %d, y = %d, w = %d, h = %d\n", pos->x, pos->y, pos->cx, pos->cy);
 
   RECT rect; // current window position
-  if(!GetWindowRect(hwnd, &rect)) goto ret;
+  if(!GetWindowRect(state->hwnd, &rect)) return;
 
   // next windown position
   int l = pos->x, r = pos->x + pos->cx, t = pos->y, b = pos->y + pos->cy;
 
   // distance to closest window border
   int dl = INT_MAX, dr = INT_MAX, dt = INT_MAX, db = INT_MAX;
-  int i; for(i = 0; i < rects_n; i++)
+  for(int i = 0; i < state->rect_list_n; i++)
   {
-    RECT* rect_ = rects + i;
+    RECT* rect_ = state->rect_list + i;
     int l_ = rect_->left, r_ = rect_->right, t_ = rect_->top, b_ = rect_->bottom;
 
     // don't snap to left/right border cont.
@@ -139,87 +155,102 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
       else if(pos->y == rect.bottom - pos->cy && abs(dt) < DY && b - t - dt > 0) { pos->cy = b - t - dt; pos->y = t + dt; }
     }
   }
+} // fproc_
 
-  ret:
+LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR state)
+{
+  switch(msg)
+  {
+  case WM_ENTERSIZEMOVE:
+    _log_("fproc | WM_ENTERSIZEMOVE: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
+    EnumWindows(fenum, state);
+    break;
+  case WM_NCDESTROY:
+  case WM_EXITSIZEMOVE:
+    _log_("fproc | RemoveWindowSubclass: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
+    if(RemoveWindowSubclass(hwnd, fproc, 0)) free((void*)state);
+    break;
+  case WM_WINDOWPOSCHANGING:
+    _log_("fproc | WM_WINDOWPOSCHANGING: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
+    fposchanging((STATE*)state, (PWINDOWPOS)lp);
+    break;
+  }
+
   return DefSubclassProc(hwnd, msg, wp, lp);
 } // fproc
 
 DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 {
-  if(code < 0 || wp != 0 || lp == 0) goto ret;
+  if(code < 0 || wp != 0 || lp == 0) return CallNextHookEx(g_hhook, code, wp, lp);
 
   PCWPSTRUCT cwp = (PCWPSTRUCT)lp;
   HWND hwnd = cwp->hwnd;
 
-  switch(cwp->message)
+  if(cwp->message == WM_ENTERSIZEMOVE)
   {
-  case WM_ENTERSIZEMOVE:
-    _log_("fhook: msg = WM_ENTERSIZEMOVE\n");
-    if(hwnd_g) break;
-    _log_("  set subclass: hwnd = %08X, fproc = %08X\n", hwnd, fproc);
-    if(SetWindowSubclass(hwnd, fproc, 0, 0))
+    if(IsZoomed(hwnd) || (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD)) return CallNextHookEx(g_hhook, code, wp, lp);
+
+    _log_("fhook | SetWindowSubclass: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
+    STATE* state = (STATE*)malloc(sizeof(STATE));
+    if(state)
     {
-      hwnd_g = hwnd;
-      rects_n = 0;
-      EnumWindows(fenum, 0);
+       memset(state, 0, sizeof(STATE));
+       state->hwnd = hwnd;
+       if(!SetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR)state)) free(state);
     }
-    break;
-  case WM_EXITSIZEMOVE:
-    _log_("fhook: msg = WM_EXITSIZEMOVE\n");
-    if(!hwnd_g) break;
-    _log_("  remove subclass: hwnd = %08X, fproc = %08X\n", hwnd, fproc);
-    if(RemoveWindowSubclass(hwnd, fproc, 0)) hwnd_g = 0;
-    break;
   }
 
-  ret:
-  return CallNextHookEx(hhook_g, code, wp, lp);
+  return CallNextHookEx(g_hhook, code, wp, lp);
 } // fhook
 
 DLL_EXPORT int hook_install()
 {
   _log_("set hook ...\n");
 
-  hhook_g = SetWindowsHookEx(WH_CALLWNDPROC, fhook, hinst_g, 0);
-  _log_("  hhook = %08X\n", hhook_g);
-  if(!hhook_g) return -1;
+  g_hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, g_hinst, 0);
+  _log_("  hhook = %08X\n", g_hhook);
+  if(!g_hhook) return -1;
 
   return 0;
 } // install
 
 DLL_EXPORT int hook_uninstall()
 {
-  if(!hhook_g) return 0;
+  if(!g_hhook) return 0;
 
   _log_("remove hook ...\n");
-  if(!UnhookWindowsHookEx(hhook_g))
+  if(!UnhookWindowsHookEx(g_hhook))
   {
-    _log_("  fail\n");
+    _log_("  FAIL\n");
     return -1;
   }
   else
   {
-    _log_("  success\n");
-    hhook_g = 0;
+    _log_("  OK\n");
+    g_hhook = 0;
     return 0;
   }
 } // uninstall
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
+  char buf[256];
+  HANDLE hproc = GetCurrentProcess();
+  GetModuleFileNameEx(hproc, 0, buf, 256);
+  CloseHandle(hproc);
+  _log_("DllMain: hinst = %08X, file = %s\n", hinst, buf);
+
   if(reason == DLL_PROCESS_ATTACH)
   {
-    _log_("DLL_PROCESS_ATTACH :: hinst = %08X\n", hinst);
+    _log_("  DLL_PROCESS_ATTACH\n");
 
-    hinst_g = hinst;
+    g_hinst = hinst;
     DisableThreadLibraryCalls(hinst);
   }
 
   if(reason == DLL_PROCESS_DETACH)
   {
-    _log_("DLL_PROCESS_DETACH :: hinst = %08X\n", hinst);
-
-    if(hwnd_g) RemoveWindowSubclass(hwnd_g, fproc, 0);
+    _log_("  DLL_PROCESS_DETACH\n");
 
     hook_uninstall();
   }

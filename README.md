@@ -2,4 +2,4 @@ snapit
 ======
 
 * allSnap replacement
-* compile with tcc compiler http://bellard.org/tcc/
+* compile with Visual C compiler

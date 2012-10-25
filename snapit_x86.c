@@ -22,12 +22,50 @@
  * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
- 
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#define STRICT 1
+#define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
 
-void main()
+int hook_install();
+int hook_uninstall();
+
+void main(int argc, char **argv)
 {
-  hook_install();
-  MessageBox(0, "Exit?", "Test", MB_OK);
-  hook_uninstall();
+  printf("usage: %s -t [sec]\n", argv[0]);
+
+  if(argc >= 2 && strcmp("-t", argv[1]) == 0)
+  {
+    hook_install();
+
+    int t = 30;
+    if(argc == 3) t = atoi(argv[2]);
+    while(t-- > 0)
+    {
+      Sleep(1000);
+      printf("%4d\r", t);
+    }
+    printf("\n");
+
+    hook_uninstall();
+
+    return;
+  }
+
+  if(argc == 2 && strcmp("-i", argv[1]) == 0)
+  {
+    hook_install();
+
+    return;
+  }
+
+  if(argc == 2 && strcmp("-u", argv[1]) == 0)
+  {
+    hook_uninstall();
+
+    return;
+  }
 }
