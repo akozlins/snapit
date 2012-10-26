@@ -1,7 +1,7 @@
 
 call "C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\vcvarsall.bat"
 
-@set CLOPTS=/nologo /W3 /MD /c /O1 /D "NDEBUG" /D "WIN32"
+@set CLOPTS=/nologo /W3 /MD /c /O2 /D "NDEBUG" /D "WIN32"
 @set LINKOPTS=/nologo /RELEASE /INCREMENTAL:NO /OPT:REF /OPT:ICF /NODEFAULTLIB msvcrt.lib kernel32.lib /MACHINE:X86
 
 cl %CLOPTS% /Tp hook_x86.c
