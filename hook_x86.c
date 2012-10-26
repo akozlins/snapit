@@ -44,7 +44,7 @@ HHOOK g_hhook = 0;
 
 HINSTANCE g_hinst = 0;
 
-#define _log_ flog
+#define _log_ // flog
 
 void flog(const char* fmt, ...)
 {
@@ -68,20 +68,21 @@ typedef struct {
   int rect_list_n;
 } STATE;
 
+BOOL WINAPI IsChild(HWND hwnd)
+{
+  return (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD) ? TRUE : FALSE;
+}
+
 BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
 {
   STATE* state = (STATE*)lp;
 
   if(state->rect_list_n == 64) return FALSE;
 
-  if(hwnd == state->hwnd ||
-    !IsWindowVisible(hwnd) ||
-    IsIconic(hwnd) ||
-    (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD)) return TRUE;
+  if(hwnd == state->hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd) || IsChild(hwnd)) return TRUE;
 
-  RECT rect;
-  if(!GetWindowRect(hwnd, &rect)) return TRUE;
-  state->rect_list[state->rect_list_n++] = rect;
+  if(!GetWindowRect(hwnd, &state->rect_list[state->rect_list_n])) return TRUE;
+  state->rect_list_n++;
 
 /*  HRGN hrgn = CreateRectRgn(0, 0, 0, 0);
   if(GetWindowRgn(hwnd, hrgn) != ERROR)
@@ -101,87 +102,106 @@ void fposchanging(STATE* state, PWINDOWPOS pos)
   if(pos->flags & SWP_NOMOVE && pos->flags & SWP_NOSIZE) return;
   _log_("  x = %d, y = %d, w = %d, h = %d\n", pos->x, pos->y, pos->cx, pos->cy);
 
-  RECT rect; // current window position
-  if(!GetWindowRect(state->hwnd, &rect)) return;
-
   // next windown position
-  int l = pos->x, r = pos->x + pos->cx, t = pos->y, b = pos->y + pos->cy;
+  const long &l = pos->x, &w = pos->cx, &t = pos->y, &h = pos->cy;
+  const long r = l + w, b = t + h;
 
   // distance to closest window border
-  int dl = INT_MAX, dr = INT_MAX, dt = INT_MAX, db = INT_MAX;
+  long dl = LONG_MAX, dr = LONG_MAX, dt = LONG_MAX, db = LONG_MAX;
   for(int i = 0; i < state->rect_list_n; i++)
   {
-    RECT* rect_ = state->rect_list + i;
-    int l_ = rect_->left, r_ = rect_->right, t_ = rect_->top, b_ = rect_->bottom;
+    RECT& rect_ = state->rect_list[i];
+    const long &l_ = rect_.left, &r_ = rect_.right, &t_ = rect_.top, &b_ = rect_.bottom;
 
     // don't snap to left/right border cont.
     if(t < b_ + DY && b > t_ - DY)
     {
-      int dl_ = l_ - l; if(abs(dl_) < abs(dl)) dl = dl_;
-          dl_ = r_ - l; if(abs(dl_) < abs(dl)) dl = dl_;
-      int dr_ = l_ - r; if(abs(dr_) < abs(dr)) dr = dr_;
-          dr_ = r_ - r; if(abs(dr_) < abs(dr)) dr = dr_;
+      long dl_ = l_ - l; if(abs(dl_) < abs(dl)) dl = dl_;
+           dl_ = r_ - l; if(abs(dl_) < abs(dl)) dl = dl_;
+      long dr_ = l_ - r; if(abs(dr_) < abs(dr)) dr = dr_;
+           dr_ = r_ - r; if(abs(dr_) < abs(dr)) dr = dr_;
     }
 
     // don't snap to top/bottom border cont.
     if(l < r_ + DX && r > l_ - DX)
     {
-      int dt_ = t_ - t; if(abs(dt_) < abs(dt)) dt = dt_;
-          dt_ = b_ - t; if(abs(dt_) < abs(dt)) dt = dt_;
-      int db_ = t_ - b; if(abs(db_) < abs(db)) db = db_;
-          db_ = b_ - b; if(abs(db_) < abs(db)) db = db_;
+      long dt_ = t_ - t; if(abs(dt_) < abs(dt)) dt = dt_;
+           dt_ = b_ - t; if(abs(dt_) < abs(dt)) dt = dt_;
+      long db_ = t_ - b; if(abs(db_) < abs(db)) db = db_;
+           db_ = b_ - b; if(abs(db_) < abs(db)) db = db_;
     }
   }
   _log_("  dl = %d, dr = %d, dt = %d, db = %d\n", dl, dr, dt, db);
 
-  if(!(pos->flags & SWP_NOMOVE) &&
-    pos->cx == (rect.right - rect.left) && pos->cy == (rect.bottom - rect.top) &&
-    (pos->x != rect.left || pos->y != rect.top))
+  RECT rect; // prev window position
+  if(!GetWindowRect(state->hwnd, &rect)) return;
+  const long &rl = rect.left, &rr = rect.right, &rt = rect.top, &rb = rect.bottom;
+  const long rw = rr - rl, rh = rb - rt;
+
+  if(!(pos->flags & SWP_NOMOVE) && w == rw && h == rh && (l != rl || t != rt))
   {
-    int dx = dl;
+    long dx = dl;
     if(abs(dr) < abs(dx)) dx = dr;
     if(abs(dx) < DX) pos->x = l + dx;
 
-    int dy = dt;
+    long dy = dt;
     if(abs(db) < abs(dy)) dy = db;
     if(abs(dy) < DY) pos->y = t + dy;
   }
   else if(!(pos->flags & SWP_NOSIZE))
   {
-    if(pos->cx != (rect.right - rect.left))
+    if(pos->cx != rw)
     {
-           if(pos->x == rect.left            && abs(dr) < DX && r - l + dr > 0) { pos->cx = r - l + dr; }
-      else if(pos->x == rect.right - pos->cx && abs(dl) < DX && r - l - dl > 0) { pos->cx = r - l - dl; pos->x = l + dl; }
+           if(l == rl && abs(dr) < DX && r - l + dr > 0) { pos->cx = r - l + dr; }
+      else if(r == rr && abs(dl) < DX && r - l - dl > 0) { pos->cx = r - l - dl; pos->x = l + dl; }
     }
-    if(pos->cy != (rect.bottom - rect.top))
+    if(pos->cy != rh)
     {
-           if(pos->y == rect.top              && abs(db) < DY && b - t + db > 0) { pos->cy = b - t + db; }
-      else if(pos->y == rect.bottom - pos->cy && abs(dt) < DY && b - t - dt > 0) { pos->cy = b - t - dt; pos->y = t + dt; }
+           if(t == rt && abs(db) < DY && b - t + db > 0) { pos->cy = b - t + db; }
+      else if(b == rb && abs(dt) < DY && b - t - dt > 0) { pos->cy = b - t - dt; pos->y = t + dt; }
     }
   }
 } // fproc_
 
-LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR state)
+LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data)
 {
+  if(!data) return DefSubclassProc(hwnd, msg, wp, lp);
+
+  STATE* state = (STATE*)data;
   switch(msg)
   {
-  case WM_ENTERSIZEMOVE:
-    _log_("fproc | WM_ENTERSIZEMOVE: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
-    EnumWindows(fenum, state);
-    break;
-  case WM_NCDESTROY:
-  case WM_EXITSIZEMOVE:
-    _log_("fproc | RemoveWindowSubclass: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
-    if(RemoveWindowSubclass(hwnd, fproc, 0)) free((void*)state);
-    break;
   case WM_WINDOWPOSCHANGING:
     _log_("fproc | WM_WINDOWPOSCHANGING: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
-    fposchanging((STATE*)state, (PWINDOWPOS)lp);
+    if(!state->hwnd)
+    {
+      state->hwnd = hwnd;
+      EnumWindows(fenum, (LPARAM)state);
+    }
+    fposchanging(state, (PWINDOWPOS)lp);
     break;
   }
 
   return DefSubclassProc(hwnd, msg, wp, lp);
 } // fproc
+
+void subclass_install(HWND hwnd)
+{
+  _log_("subclass_install: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
+  STATE* state = 0;
+  if(state = (STATE*)malloc(sizeof(STATE)))
+  {
+     memset(state, 0, sizeof(STATE));
+     if(!SetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR)state)) free(state);
+  }
+}
+
+void subclass_uninstall(HWND hwnd)
+{
+  _log_("subclass_uninstall: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
+  STATE* state = 0;
+  if(!GetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR*)&state) || !state) return;
+  if(RemoveWindowSubclass(hwnd, fproc, 0)) free(state);
+}
 
 DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 {
@@ -190,18 +210,24 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
   PCWPSTRUCT cwp = (PCWPSTRUCT)lp;
   HWND hwnd = cwp->hwnd;
 
-  if(cwp->message == WM_ENTERSIZEMOVE)
+/*  char buf[256];
+  if(cwp->message != WM_GETTEXT && GetWindowText(hwnd, buf, 256) && strstr(buf, "EVO"))
   {
-    if(IsZoomed(hwnd) || (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD)) return CallNextHookEx(g_hhook, code, wp, lp);
+    _log_("message = %08X, text = %s\n", cwp->message, buf);
+  }*/
 
-    _log_("fhook | SetWindowSubclass: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
-    STATE* state = (STATE*)malloc(sizeof(STATE));
-    if(state)
-    {
-       memset(state, 0, sizeof(STATE));
-       state->hwnd = hwnd;
-       if(!SetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR)state)) free(state);
-    }
+  switch(cwp->message)
+  {
+//  case WM_WINDOWPOSCHANGING:
+//    if(GetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR*)&state) && state) break;
+  case WM_ENTERSIZEMOVE:
+    if(IsZoomed(hwnd) || IsChild(hwnd)) break;
+    subclass_install(hwnd);
+    break;
+  case WM_NCDESTROY:
+  case WM_EXITSIZEMOVE:
+    subclass_uninstall(hwnd);
+    break;
   }
 
   return CallNextHookEx(g_hhook, code, wp, lp);
@@ -235,6 +261,17 @@ DLL_EXPORT int hook_uninstall()
   }
 } // uninstall
 
+BOOL CALLBACK fenum_subclass_uninstall(HWND hwnd, LPARAM lp)
+{
+  DWORD id = 0;
+  GetWindowThreadProcessId(hwnd, &id);
+  if(id != GetCurrentProcessId()) return TRUE;
+
+  subclass_uninstall(hwnd);
+
+  return TRUE;
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
   char buf[256];
@@ -254,6 +291,8 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   if(reason == DLL_PROCESS_DETACH)
   {
     _log_("  DLL_PROCESS_DETACH\n");
+
+    EnumWindows(fenum_subclass_uninstall, 0);
   }
 
   return TRUE;
