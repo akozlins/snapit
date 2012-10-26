@@ -35,37 +35,18 @@ int hook_uninstall();
 
 void main(int argc, char **argv)
 {
-  printf("usage: %s -t [sec]\n", argv[0]);
-
-  if(argc >= 2 && strcmp("-t", argv[1]) == 0)
+  if(argc == 3 && strcmp("-t", argv[1]) == 0)
   {
     hook_install();
 
-    int t = 30;
-    if(argc == 3) t = atoi(argv[2]);
-    while(t-- > 0)
-    {
-      Sleep(1000);
+    int t = atoi(argv[2]);
+    do {
       printf("%4d\r", t);
-    }
+      Sleep(1000);
+    } while(t-- > 0);
     printf("\n");
 
     hook_uninstall();
-
-    return;
   }
-
-  if(argc == 2 && strcmp("-i", argv[1]) == 0)
-  {
-    hook_install();
-
-    return;
-  }
-
-  if(argc == 2 && strcmp("-u", argv[1]) == 0)
-  {
-    hook_uninstall();
-
-    return;
-  }
+  else printf("usage: %s -t _sec_\n", argv[0]);
 }
