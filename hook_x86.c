@@ -288,12 +288,13 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   {
     _log_("  DLL_PROCESS_ATTACH\n");
 
-    WMU_SNAPIT_UNINSTALL =
-    #if defined(WIN64)
-      RegisterWindowMessage("WMU_SNAPIT_UNINSTALL_{494e0de4-493b-4d30-9eb5-e7de12b247c0}");
-    #else
-      RegisterWindowMessage("WMU_SNAPIT_UNINSTALL_{faa9d599-79d1-4112-ac68-1263a84c1d24}");
-    #endif
+    WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(
+      #if defined(WIN64)
+        "WMU_SNAPIT_UNINSTALL_{494e0de4-493b-4d30-9eb5-e7de12b247c0}"
+      #else
+        "WMU_SNAPIT_UNINSTALL_{faa9d599-79d1-4112-ac68-1263a84c1d24}"
+      #endif
+    );
 
     g_hinst = hinst;
     DisableThreadLibraryCalls(hinst);

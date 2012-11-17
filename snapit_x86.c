@@ -115,14 +115,23 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
 //  freopen("CON", "w", stdout);
 #pragma warning(pop)
 
-  WMU_SNAPIT_UNINSTALL =
-  #if defined(WIN64)
-    RegisterWindowMessage("WMU_SNAPIT_UNINSTALL_{494e0de4-493b-4d30-9eb5-e7de12b247c0}");
-  #else
-    RegisterWindowMessage("WMU_SNAPIT_UNINSTALL_{faa9d599-79d1-4112-ac68-1263a84c1d24}");
-  #endif
+  WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(
+    #if defined(WIN64)
+      "WMU_SNAPIT_UNINSTALL_{494e0de4-493b-4d30-9eb5-e7de12b247c0}"
+    #else
+      "WMU_SNAPIT_UNINSTALL_{faa9d599-79d1-4112-ac68-1263a84c1d24}"
+    #endif
+  );
 
-  g_icon = (HICON)LoadImage(NULL, "snapit.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+  g_icon = (HICON)LoadImage(
+    NULL,
+    #if defined(WIN64)
+      "snapit64.ico",
+    #else
+      "snapit32.ico",
+    #endif
+    IMAGE_ICON, 0, 0, LR_LOADFROMFILE
+  );
 
   WNDCLASSEX wc;
   ZeroMemory(&wc, sizeof(wc));
