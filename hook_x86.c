@@ -37,6 +37,8 @@
 #define DX 16
 #define DY 16
 
+UINT WMU_SNAPIT_UNINSTALL;
+
 #pragma data_seg(".sdata")
 HHOOK g_hhook = 0;
 #pragma data_seg()
@@ -64,7 +66,7 @@ void flog(const char* fmt, ...)
 
 typedef struct {
   HWND hwnd;
-  RECT rect_list[64];
+  RECT rect_list[32];
   int rect_list_n;
 } STATE;
 
@@ -77,7 +79,7 @@ BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
 {
   STATE* state = (STATE*)lp;
 
-  if(state->rect_list_n == 64) return FALSE;
+  if(state->rect_list_n == 32) return FALSE;
 
   if(hwnd == state->hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd) || IsChild(hwnd)) return TRUE;
 
@@ -205,7 +207,7 @@ void subclass_uninstall(HWND hwnd)
 
 DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 {
-  if(code < 0 || wp != 0 || lp == 0) return CallNextHookEx(g_hhook, code, wp, lp);
+  if(code < 0 || wp != 0 || lp == 0) return CallNextHookEx(0, code, wp, lp);
 
   PCWPSTRUCT cwp = (PCWPSTRUCT)lp;
   HWND hwnd = cwp->hwnd;
@@ -230,7 +232,9 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
     break;
   }
 
-  return CallNextHookEx(g_hhook, code, wp, lp);
+  if(cwp->message == WMU_SNAPIT_UNINSTALL) subclass_uninstall(hwnd);
+
+  return CallNextHookEx(0, code, wp, lp);
 } // fhook
 
 DLL_EXPORT int hook_install()
@@ -283,6 +287,13 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   if(reason == DLL_PROCESS_ATTACH)
   {
     _log_("  DLL_PROCESS_ATTACH\n");
+
+    WMU_SNAPIT_UNINSTALL =
+    #if defined(WIN64)
+      RegisterWindowMessage("WMU_SNAPIT_UNINSTALL_{494e0de4-493b-4d30-9eb5-e7de12b247c0}");
+    #else
+      RegisterWindowMessage("WMU_SNAPIT_UNINSTALL_{faa9d599-79d1-4112-ac68-1263a84c1d24}");
+    #endif
 
     g_hinst = hinst;
     DisableThreadLibraryCalls(hinst);
