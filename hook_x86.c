@@ -75,28 +75,57 @@ BOOL WINAPI IsChild(HWND hwnd)
   return (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD) ? TRUE : FALSE;
 }
 
-BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
+/*BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
 {
   STATE* state = (STATE*)lp;
 
-  if(state->rect_list_n == 32) return FALSE;
-
   if(hwnd == state->hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd) || IsChild(hwnd)) return TRUE;
 
-  if(!GetWindowRect(hwnd, &state->rect_list[state->rect_list_n])) return TRUE;
+  RECT& rect = state->rect_list[state->rect_list_n];
+  if(!GetWindowRect(hwnd, &rect)) return TRUE;
   state->rect_list_n++;
-
-/*  HRGN hrgn = CreateRectRgn(0, 0, 0, 0);
-  if(GetWindowRgn(hwnd, hrgn) != ERROR)
-  {
-    GetRgnBox()
-    CombineRgn()
-  }
-  DeleteObject(hrgn);*/
 
 //  if(lp == 0) EnumChildWindows(hwnd, fenum, 1)
 
   return TRUE;
+} // fenum*/
+
+void fenum(STATE* state)
+{
+  HWND hwnd = state->hwnd;
+
+  HWND hwndDesktop = GetDesktopWindow();
+  HWND hwndStart = FindWindowEx(hwndDesktop, NULL, "Button", "Start");
+
+  RECT& rectDesktop = state->rect_list[state->rect_list_n];
+  if(!GetWindowRect(hwndDesktop, &rectDesktop)) return;
+  state->rect_list_n++;
+
+  HRGN hrgnDesktop = CreateRectRgn(rectDesktop.left, rectDesktop.top, rectDesktop.right, rectDesktop.bottom);
+  HRGN hrgn = CreateRectRgn(0, 0, 0, 0);
+  HRGN hrgn_ = CreateRectRgn(0, 0, 0, 0);
+  for(HWND hwnd_ = GetTopWindow(NULL); hwnd_ != NULL; hwnd_ = GetWindow(hwnd_, GW_HWNDNEXT))
+  {
+    if(hwnd_ == hwnd || hwnd_ == hwndStart || hwnd_ == hwndDesktop ||
+      !IsWindowVisible(hwnd_) || IsIconic(hwnd_) || IsChild(hwnd)) continue;
+
+    RECT& rect = state->rect_list[state->rect_list_n];
+    if(!GetWindowRect(hwnd_, &rect)) continue;
+
+    if(!SetRectRgn(hrgn_, rect.left, rect.top, rect.right, rect.bottom)) continue;
+    if(hrgnDesktop)
+    {
+      if(CombineRgn(hrgn_, hrgn_, hrgnDesktop, RGN_AND) == NULLREGION) continue;
+      if(GetRgnBox(hrgn_, &rect) == NULLREGION) continue;
+    }
+    if(CombineRgn(hrgn_, hrgn_, hrgn, RGN_DIFF) == NULLREGION) continue;
+    if(CombineRgn(hrgn, hrgn, hrgn_, RGN_OR) == ERROR) continue;
+
+    if(state->rect_list_n++ == sizeof(state->rect_list) / sizeof(RECT)) break;
+  }
+  DeleteObject(hrgn_);
+  DeleteObject(hrgn);
+  DeleteObject(hrgnDesktop);
 } // fenum
 
 void fposchanging(STATE* state, PWINDOWPOS pos)
@@ -177,9 +206,9 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
     if(!state->hwnd)
     {
       state->hwnd = hwnd;
-      EnumWindows(fenum, (LPARAM)state);
+      fenum(state);
     }
-    fposchanging(state, (PWINDOWPOS)lp);
+    if(state->rect_list_n > 0) fposchanging(state, (PWINDOWPOS)lp);
     break;
   }
 
@@ -211,12 +240,6 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 
   PCWPSTRUCT cwp = (PCWPSTRUCT)lp;
   HWND hwnd = cwp->hwnd;
-
-/*  char buf[256];
-  if(cwp->message != WM_GETTEXT && GetWindowText(hwnd, buf, 256) && strstr(buf, "EVO"))
-  {
-    _log_("message = %08X, text = %s\n", cwp->message, buf);
-  }*/
 
   switch(cwp->message)
   {
