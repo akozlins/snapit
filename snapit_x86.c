@@ -37,44 +37,54 @@ int hook_install();
 int hook_uninstall();
 
 const char* g_title = "SnapIt";
-HICON g_icon;
+HICON g_icon = 0;
 
 const UINT WMU_TRAYICON = WM_USER + 1;
-NOTIFYICONDATA g_notifyIconData;
-const UINT ID_MENU_INSTALL = 0xFF00 + 1;
+const UINT ID_MENU_INSTALL   = 0xFF00 + 1;
 const UINT ID_MENU_UNINSTALL = 0xFF00 + 2;
-const UINT ID_MENU_EXIT = 0xFF00 + 3;
-HMENU g_menu;
+const UINT ID_MENU_EXIT      = 0xFF00 + 3;
+HMENU g_menu = 0;
+
+HWND hwndEdit = 0;
+
+void hook_install_()
+{
+  EnableMenuItem(g_menu, ID_MENU_INSTALL, MF_GRAYED);
+  hook_install();
+  EnableMenuItem(g_menu, ID_MENU_UNINSTALL, MF_ENABLED);
+}
+
+void hook_uninstall_()
+{
+  EnableMenuItem(g_menu, ID_MENU_UNINSTALL, MF_GRAYED);
+  SendMessageTimeout(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0, SMTO_NORMAL, 250, NULL);
+  hook_uninstall();
+  EnableMenuItem(g_menu, ID_MENU_INSTALL, MF_ENABLED);
+}
 
 LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-  switch(msg)
+  if(msg == WMU_TRAYICON)
   {
-  case WMU_TRAYICON:
-    printf("WMU_TRAYICON\n");
     switch(lp)
     {
     case WM_LBUTTONUP:
+      SetForegroundWindow(hwnd);
 //      ShowWindow(hwnd, SW_SHOW);
-//      SetForegroundWindow(hwnd);
       break;
     case WM_RBUTTONUP:
+      SetForegroundWindow(hwnd);
+
       POINT point;
       GetCursorPos(&point);
 
-      SetForegroundWindow(hwnd);
       switch(TrackPopupMenu(g_menu, TPM_RETURNCMD | TPM_NONOTIFY, point.x, point.y, 0, hwnd, NULL))
       {
       case ID_MENU_INSTALL:
-        EnableMenuItem(g_menu, ID_MENU_INSTALL, MF_GRAYED);
-        hook_install();
-        EnableMenuItem(g_menu, ID_MENU_UNINSTALL, MF_ENABLED);
+        hook_install_();
         break;
       case ID_MENU_UNINSTALL:
-        EnableMenuItem(g_menu, ID_MENU_UNINSTALL, MF_GRAYED);
-        SendMessageTimeout(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0, SMTO_NORMAL, 250, NULL);
-        hook_uninstall();
-        EnableMenuItem(g_menu, ID_MENU_INSTALL, MF_ENABLED);
+        hook_uninstall_();
         break;
       case ID_MENU_EXIT:
         PostMessage(hwnd, WM_CLOSE, 0, 0);
@@ -82,25 +92,33 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       }
       break;
     }
-    return 0; break;
+    return 0;
+  }
+
+  switch(msg)
+  {
   case WM_CREATE:
+    hwndEdit = CreateWindow(
+      "edit", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY,
+      0, 0, 0, 0,
+      hwnd, NULL, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+    break;
+  case WM_SIZE:
+    MoveWindow(hwndEdit, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);    
     break;
   case WM_SYSCOMMAND:
-    printf("WM_SYSCOMMAND\n");
     switch(wp & 0xFFF0)
     {
     case SC_MINIMIZE:
-      printf("SC_MINIMIZE\n");
       ShowWindow(hwnd, SW_HIDE);
       return 0; break;
     }
     break;
   case WM_CLOSE:
-    DestroyWindow(hwnd);
-    return 0; break;
+    break;
   case WM_DESTROY:
     PostQuitMessage(0);
-    return 0; break;
+    break;
   }
 
   return DefWindowProc(hwnd, msg, wp, lp);
@@ -154,23 +172,26 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
     WS_EX_CLIENTEDGE,
     g_title, g_title,
     WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-    CW_USEDEFAULT, CW_USEDEFAULT, 160, 120,
+    CW_USEDEFAULT, CW_USEDEFAULT, 640, 480,
     0, 0, hinst, 0);
 
   if(hwnd == 0) return 0;
 
-  memset(&g_notifyIconData, 0, sizeof(g_notifyIconData));
-  g_notifyIconData.hWnd = hwnd;
-  g_notifyIconData.uFlags = NIF_ICON | NIF_MESSAGE;
-  g_notifyIconData.uCallbackMessage = WMU_TRAYICON;
-  g_notifyIconData.hIcon = g_icon;
+  NOTIFYICONDATA idata;
+  memset(&idata, 0, sizeof(idata));
+  idata.cbSize = sizeof(idata);
+  idata.hWnd = hwnd;
+  idata.uFlags = NIF_MESSAGE | NIF_ICON;
+  idata.uCallbackMessage = WMU_TRAYICON;
+  idata.hIcon = g_icon;
 
   g_menu = CreatePopupMenu();
   AppendMenu(g_menu, MF_STRING, ID_MENU_INSTALL, "Install");
   AppendMenu(g_menu, MF_STRING | MF_GRAYED, ID_MENU_UNINSTALL, "Uninstall");
   AppendMenu(g_menu, MF_STRING, ID_MENU_EXIT, "Exit");
 
-  Shell_NotifyIcon(NIM_ADD, &g_notifyIconData);
+  Shell_NotifyIcon(NIM_ADD, &idata);
+  hook_install_();
 
   MSG msg;
   while(GetMessage(&msg, 0, 0, 0) > 0)
@@ -179,10 +200,8 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
     DispatchMessage(&msg);
   }
 
-  Shell_NotifyIcon(NIM_DELETE, &g_notifyIconData);
-
-  hook_uninstall();
-  SendMessageTimeout(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0, SMTO_NORMAL, 250, NULL);
+  hook_uninstall_();
+  Shell_NotifyIcon(NIM_DELETE, &idata);
 
   return 0;
 }
