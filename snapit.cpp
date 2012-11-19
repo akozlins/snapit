@@ -104,7 +104,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       hwnd, NULL, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
     break;
   case WM_SIZE:
-    MoveWindow(hwndEdit, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);    
+    MoveWindow(hwndEdit, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
     break;
   case WM_SYSCOMMAND:
     switch(wp & 0xFFF0)
