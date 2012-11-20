@@ -218,20 +218,22 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
 void subclass_install(HWND hwnd)
 {
   _log_("subclass_install: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
-  STATE* state = 0;
-  if(state = (STATE*)malloc(sizeof(STATE)))
+  DWORD_PTR state = 0;
+  if(GetWindowSubclass(hwnd, fproc, 0, &state) && state) return;
+
+  if(state = (DWORD_PTR)malloc(sizeof(STATE)))
   {
-     memset(state, 0, sizeof(STATE));
-     if(!SetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR)state)) free(state);
+     memset((void*)state, 0, sizeof(STATE));
+     if(!SetWindowSubclass(hwnd, fproc, 0, state)) free((void*)state);
   }
 }
 
 void subclass_uninstall(HWND hwnd)
 {
   _log_("subclass_uninstall: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
-  STATE* state = 0;
-  if(!GetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR*)&state) || !state) return;
-  if(RemoveWindowSubclass(hwnd, fproc, 0)) free(state);
+  DWORD_PTR state = 0;
+  if(!GetWindowSubclass(hwnd, fproc, 0, &state) || !state) return;
+  if(RemoveWindowSubclass(hwnd, fproc, 0)) free((void*)state);
 }
 
 DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
@@ -244,7 +246,6 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
   switch(cwp->message)
   {
 //  case WM_WINDOWPOSCHANGING:
-//    if(GetWindowSubclass(hwnd, fproc, 0, (DWORD_PTR*)&state) && state) break;
   case WM_ENTERSIZEMOVE:
     if(IsZoomed(hwnd) || IsChild(hwnd)) break;
     subclass_install(hwnd);
