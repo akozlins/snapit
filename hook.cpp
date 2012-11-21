@@ -32,12 +32,14 @@
 #include <commctrl.h>
 #include <psapi.h>
 
+#include "snapit.h"
+
+UINT WMU_SNAPIT_UNINSTALL;
+
 #define DLL_EXPORT __declspec(dllexport)
 
 #define DX 16
 #define DY 16
-
-UINT WMU_SNAPIT_UNINSTALL;
 
 #pragma data_seg(".sdata")
 HHOOK g_hhook = 0;
@@ -46,9 +48,29 @@ HHOOK g_hhook = 0;
 
 HINSTANCE g_hinst = 0;
 
-#define _log_ // flog
+#define _log_ flog_copydata
 
-void flog(const char* fmt, ...)
+void flog_copydata(const char* fmt, ...)
+{
+  HWND hwnd = FindWindow(g_class_name, g_title);
+  if(!hwnd) return;
+
+  char buffer[64];
+
+  va_list list;
+  va_start(list, fmt);
+  int n = vsnprintf_s(buffer, sizeof(buffer) - 2, _TRUNCATE, fmt, list);
+  if(n < 0) n = sizeof(buffer) - 3;
+  va_end(list);
+
+  const char* nl = "\n";
+  memcpy(buffer + n, nl, strlen(nl) + 1);
+
+  COPYDATASTRUCT data = { 0, sizeof(buffer), buffer };
+  SendMessage(hwnd, WM_COPYDATA, 0, (LPARAM)&data);
+} // flog
+
+void flog_file(const char* fmt, ...)
 {
 #pragma warning(push)
 #pragma warning( disable : 4996 )
@@ -74,21 +96,6 @@ BOOL WINAPI IsChild(HWND hwnd)
 {
   return (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD) ? TRUE : FALSE;
 }
-
-/*BOOL CALLBACK fenum(HWND hwnd, LPARAM lp)
-{
-  STATE* state = (STATE*)lp;
-
-  if(hwnd == state->hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd) || IsChild(hwnd)) return TRUE;
-
-  RECT& rect = state->rect_list[state->rect_list_n];
-  if(!GetWindowRect(hwnd, &rect)) return TRUE;
-  state->rect_list_n++;
-
-//  if(lp == 0) EnumChildWindows(hwnd, fenum, 1)
-
-  return TRUE;
-} // fenum*/
 
 void fenum(STATE* state)
 {
@@ -131,7 +138,6 @@ void fenum(STATE* state)
 void fposchanging(STATE* state, PWINDOWPOS pos)
 {
   if(pos->flags & SWP_NOMOVE && pos->flags & SWP_NOSIZE) return;
-  _log_("  x = %d, y = %d, w = %d, h = %d\n", pos->x, pos->y, pos->cx, pos->cy);
 
   // next windown position
   const long &l = pos->x, &w = pos->cx, &t = pos->y, &h = pos->cy;
@@ -162,7 +168,6 @@ void fposchanging(STATE* state, PWINDOWPOS pos)
            db_ = b_ - b; if(abs(db_) < abs(db)) db = db_;
     }
   }
-  _log_("  dl = %d, dr = %d, dt = %d, db = %d\n", dl, dr, dt, db);
 
   RECT rect; // prev window position
   if(!GetWindowRect(state->hwnd, &rect)) return;
@@ -202,7 +207,6 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
   switch(msg)
   {
   case WM_WINDOWPOSCHANGING:
-    _log_("fproc | WM_WINDOWPOSCHANGING: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
     if(!state->hwnd)
     {
       state->hwnd = hwnd;
@@ -238,7 +242,7 @@ void subclass_uninstall(HWND hwnd)
 
 DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 {
-  if(code < 0 || wp != 0 || lp == 0) return CallNextHookEx(0, code, wp, lp);
+  if(code < 0 || lp == 0) return CallNextHookEx(0, code, wp, lp);
 
   PCWPSTRUCT cwp = (PCWPSTRUCT)lp;
   HWND hwnd = cwp->hwnd;
@@ -289,36 +293,19 @@ DLL_EXPORT int hook_uninstall()
   }
 } // uninstall
 
-BOOL CALLBACK fenum_subclass_uninstall(HWND hwnd, LPARAM lp)
-{
-  DWORD id = 0;
-  GetWindowThreadProcessId(hwnd, &id);
-  if(id != GetCurrentProcessId()) return TRUE;
-
-  subclass_uninstall(hwnd);
-
-  return TRUE;
-}
-
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
   char buf[256];
   HANDLE hproc = GetCurrentProcess();
   GetModuleFileNameEx(hproc, 0, buf, 256);
   CloseHandle(hproc);
-  _log_("DllMain: hinst = %08X, file = %s\n", hinst, buf);
+  _log_("DllMain: %s\n", buf);
 
   if(reason == DLL_PROCESS_ATTACH)
   {
     _log_("  DLL_PROCESS_ATTACH\n");
 
-    WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(
-      #if defined(WIN64)
-        "WMU_SNAPIT_UNINSTALL_{494e0de4-493b-4d30-9eb5-e7de12b247c0}"
-      #else
-        "WMU_SNAPIT_UNINSTALL_{faa9d599-79d1-4112-ac68-1263a84c1d24}"
-      #endif
-    );
+    WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(g_message_name);
 
     g_hinst = hinst;
     DisableThreadLibraryCalls(hinst);
@@ -327,8 +314,6 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   if(reason == DLL_PROCESS_DETACH)
   {
     _log_("  DLL_PROCESS_DETACH\n");
-
-    EnumWindows(fenum_subclass_uninstall, 0);
   }
 
   return TRUE;

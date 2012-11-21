@@ -31,24 +31,12 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include "snapit.h"
+
 UINT WMU_SNAPIT_UNINSTALL;
 
 int hook_install();
 int hook_uninstall();
-
-#if defined(WIN64)
-const char* g_mutex_name = "MUTEX_SNAPIT_x64_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
-const char* g_message_name = "WMU_SNAPIT_UNINSTALL_x64_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
-const char* g_class_name = "SnapIt_x64_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
-const char* g_title = "SnapItX64";
-const char* g_icon_name = "snapit_x64.ico";
-#else
-const char* g_mutex_name = "MUTEX_SNAPIT_x32_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
-const char* g_message_name = "WMU_SNAPIT_UNINSTALL_x32_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
-const char* g_class_name = "SnapIt_x32_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
-const char* g_title = "SnapItX32";
-const char* g_icon_name = "snapit_x32.ico";
-#endif
 
 NOTIFYICONDATA g_idata;
 HICON g_icon = 0;
@@ -60,7 +48,8 @@ const UINT ID_MENU_HIDE      = 0xFF00 + 3;
 const UINT ID_MENU_EXIT      = 0xFF00 + 4;
 HMENU g_menu = 0;
 
-HWND hwndEdit = 0;
+HWND g_hwndEdit = 0;
+volatile long g_lock = 0;
 
 void hook_install_()
 {
@@ -71,8 +60,9 @@ void hook_install_()
 
 void hook_uninstall_()
 {
+  PostMessage(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0);
+
   EnableMenuItem(g_menu, ID_MENU_UNINSTALL, MF_GRAYED);
-  SendMessageTimeout(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0, SMTO_NORMAL, 500, NULL);
   hook_uninstall();
   EnableMenuItem(g_menu, ID_MENU_INSTALL, MF_ENABLED);
 }
@@ -116,13 +106,16 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
   switch(msg)
   {
   case WM_CREATE:
-    hwndEdit = CreateWindow(
-      "edit", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY,
+    g_hwndEdit = CreateWindow("edit", "",
+      WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY,
       0, 0, 0, 0,
-      hwnd, NULL, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+      hwnd, NULL, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
+    );
+    SendMessage(g_hwndEdit, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FIXED_FONT), 0);
+    SendMessage(g_hwndEdit, EM_LIMITTEXT, 1024 * 1024 * 1024, 0);
     break;
   case WM_SIZE:
-    MoveWindow(hwndEdit, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
+    MoveWindow(g_hwndEdit, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
     break;
   case WM_SYSCOMMAND:
     switch(wp & 0xFFF0)
@@ -137,6 +130,17 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     break;
   case WM_DESTROY:
     PostQuitMessage(0);
+    break;
+  case WM_COPYDATA:
+    {
+      int n = GetWindowTextLength(g_hwndEdit);
+      SetFocus(g_hwndEdit);
+      SendMessage(g_hwndEdit, EM_SETSEL, n, n);
+      PCOPYDATASTRUCT data = (PCOPYDATASTRUCT)lp;
+      SendMessage(g_hwndEdit, EM_REPLACESEL, 0, (LPARAM)data->lpData);
+    }
+    break;
+  default:
     break;
   }
 
@@ -194,11 +198,16 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
     g_class_name, g_title,
     WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
     CW_USEDEFAULT, CW_USEDEFAULT, 640, 480,
-    0, 0, hinst, 0);
+    0, 0, hinst, 0
+  );
 
   ReleaseMutex(mutex);
 
-  if(hwnd == 0) return 0;
+  if(hwnd == 0)
+  {
+    CloseHandle(mutex);
+    return 0;
+  }
 
   memset(&g_idata, 0, sizeof(g_idata));
   g_idata.cbSize = sizeof(g_idata);
