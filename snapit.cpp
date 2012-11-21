@@ -132,6 +132,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     PostQuitMessage(0);
     break;
   case WM_COPYDATA:
+    if(IsWindowVisible(hwnd))
     {
       int n = GetWindowTextLength(g_hwndEdit);
       SetFocus(g_hwndEdit);
@@ -139,8 +140,6 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       PCOPYDATASTRUCT data = (PCOPYDATASTRUCT)lp;
       SendMessage(g_hwndEdit, EM_REPLACESEL, 0, (LPARAM)data->lpData);
     }
-    break;
-  default:
     break;
   }
 
