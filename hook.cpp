@@ -56,8 +56,8 @@ char g_file_log[256];
 void flog(const char* fmt, ...)
 {
   FILE* file = 0;
-  int i = 0;
-  while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1) i++;
+  int lock_i = 0;
+  while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1) lock_i++;
   if(fopen_s(&file, g_file_log, "a+") == 0 && file)
   {
     va_list list;
@@ -65,7 +65,7 @@ void flog(const char* fmt, ...)
     vfprintf(file, fmt, list);
     va_end(list);
 
-    fprintf(file, " // i = %d \n", i);
+    fprintf(file, "\n");
     fclose(file);
   }
   InterlockedExchange(&g_lock_log, 0);
@@ -308,18 +308,18 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
   if(reason == DLL_PROCESS_ATTACH)
   {
     HANDLE hproc = GetCurrentProcess();
-    GetModuleFileNameEx(hproc, 0, g_file_proc, 256);
+    GetModuleFileNameEx(hproc, 0, g_file_proc, sizeof(g_file_proc));
     CloseHandle(hproc);
 
-    int n = GetModuleFileName(hinst, g_file_log, 256);
+    int n = GetModuleFileName(hinst, g_file_log, sizeof(g_file_log));
     while(g_file_log[n] != '\\') n--;
     #if defined(WIN64)
-      memcpy(g_file_log + n, "\\snapit_x64.log", 5);
+      strcpy_s(g_file_log + n, sizeof(g_file_log) - n, "\\snapit_x64.log");
     #else
-      memcpy(g_file_log + n, "\\snapit_x32.log", 5);
+      strcpy_s(g_file_log + n, sizeof(g_file_log) - n, "\\snapit_x32.log");
     #endif
 
-    _log_("DllMain | DLL_PROCESS_ATTACH: file = %s", g_file_proc);
+    _log_("attach -> %s", g_file_proc);
 
     WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(g_message_name);
 
@@ -329,7 +329,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 
   if(reason == DLL_PROCESS_DETACH)
   {
-    _log_("DllMain | DLL_PROCESS_DETACH: file = %s", g_file_proc);
+    _log_("detach -> %s", g_file_proc);
   }
 
   return TRUE;
