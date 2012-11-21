@@ -43,47 +43,52 @@ UINT WMU_SNAPIT_UNINSTALL;
 
 #pragma data_seg(".sdata")
 HHOOK g_hhook = 0;
+volatile long g_lock_log = 0;
 #pragma data_seg()
 #pragma comment(linker, "/section:.sdata,rws")
 
 HINSTANCE g_hinst = 0;
+char g_file_proc[256];
+char g_file_log[256];
 
-#define _log_ flog_copydata
+#define _log_ flog
 
-void flog_copydata(const char* fmt, ...)
+void flog(const char* fmt, ...)
 {
+  FILE* file = 0;
+  int i = 0;
+  while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1) i++;
+  if(fopen_s(&file, g_file_log, "a+") == 0 && file)
+  {
+    va_list list;
+    va_start(list, fmt);
+    vfprintf(file, fmt, list);
+    va_end(list);
+
+    fprintf(file, " // i = %d \n", i);
+    fclose(file);
+  }
+  InterlockedExchange(&g_lock_log, 0);
+
   HWND hwnd = FindWindow(g_class_name, g_title);
-  if(!hwnd) return;
+  if(hwnd)
+  {
+    char buffer[64];
 
-  char buffer[64];
+    va_list list;
+    va_start(list, fmt);
+    int n = vsnprintf_s(buffer, sizeof(buffer) - 2, _TRUNCATE, fmt, list);
+    va_end(list);
 
-  va_list list;
-  va_start(list, fmt);
-  int n = vsnprintf_s(buffer, sizeof(buffer) - 2, _TRUNCATE, fmt, list);
-  if(n < 0) n = sizeof(buffer) - 3;
-  va_end(list);
+    if(n < 0) n = sizeof(buffer) - 3;
 
-  const char* nl = "\n";
-  memcpy(buffer + n, nl, strlen(nl) + 1);
-
-  COPYDATASTRUCT data = { 0, sizeof(buffer), buffer };
-  SendMessage(hwnd, WM_COPYDATA, 0, (LPARAM)&data);
-} // flog
-
-void flog_file(const char* fmt, ...)
-{
-#pragma warning(push)
-#pragma warning( disable : 4996 )
-  FILE* file = fopen("d:/out.txt", "a+");
-#pragma warning(pop)
-  if(!file) return;
-
-  va_list list;
-  va_start(list, fmt);
-  vfprintf(file, fmt, list);
-  va_end(list);
-
-  fclose(file);
+    buffer[n++] = 0x0D;
+    buffer[n++] = 0x0A;
+    buffer[n++] = 0x00;
+  
+    COPYDATASTRUCT data = { 0, sizeof(buffer), buffer };
+    SendMessage(hwnd, WM_COPYDATA, 0, (LPARAM)&data);
+  }
 } // flog
 
 typedef struct {
@@ -221,22 +226,23 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
 
 void subclass_install(HWND hwnd)
 {
-  _log_("subclass_install: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
   DWORD_PTR state = 0;
   if(GetWindowSubclass(hwnd, fproc, 0, &state) && state) return;
 
   if(state = (DWORD_PTR)malloc(sizeof(STATE)))
   {
      memset((void*)state, 0, sizeof(STATE));
+    _log_("subclass_install: thread = %d, hwnd = %08X", GetCurrentThreadId(), hwnd);
      if(!SetWindowSubclass(hwnd, fproc, 0, state)) free((void*)state);
   }
 }
 
 void subclass_uninstall(HWND hwnd)
 {
-  _log_("subclass_uninstall: thread = %d, hwnd = %08X\n", GetCurrentThreadId(), hwnd);
   DWORD_PTR state = 0;
   if(!GetWindowSubclass(hwnd, fproc, 0, &state) || !state) return;
+
+  _log_("subclass_uninstall: thread = %d, hwnd = %08X", GetCurrentThreadId(), hwnd);
   if(RemoveWindowSubclass(hwnd, fproc, 0)) free((void*)state);
 }
 
@@ -260,17 +266,21 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
     break;
   }
 
-  if(cwp->message == WMU_SNAPIT_UNINSTALL) subclass_uninstall(hwnd);
+  if(cwp->message == WMU_SNAPIT_UNINSTALL)
+  {
+    _log_("fhook | WMU_SNAPIT_UNINSTALL: thread = %d, hwnd = %08X", GetCurrentThreadId(), hwnd);
+    subclass_uninstall(hwnd);
+  }
 
   return CallNextHookEx(0, code, wp, lp);
 } // fhook
 
 DLL_EXPORT int hook_install()
 {
-  _log_("set hook ...\n");
+  _log_("set hook ...");
 
   if(!g_hhook) g_hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, g_hinst, 0);
-  _log_("  hhook = %08X\n", g_hhook);
+  _log_("  hhook = %08X", g_hhook);
 
   return (g_hhook ? 0 : -1);
 } // install
@@ -279,31 +289,37 @@ DLL_EXPORT int hook_uninstall()
 {
   if(!g_hhook) return 0;
 
-  _log_("remove hook ...\n");
+  _log_("remove hook ...");
   if(UnhookWindowsHookEx(g_hhook))
   {
     g_hhook = 0;
-    _log_("  OK\n");
+    _log_("  OK");
     return 0;
   }
   else
   {
-    _log_("  FAIL\n");
+    _log_("  FAIL");
     return -1;
   }
 } // uninstall
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
-  char buf[256];
-  HANDLE hproc = GetCurrentProcess();
-  GetModuleFileNameEx(hproc, 0, buf, 256);
-  CloseHandle(hproc);
-  _log_("DllMain: %s\n", buf);
-
   if(reason == DLL_PROCESS_ATTACH)
   {
-    _log_("  DLL_PROCESS_ATTACH\n");
+    HANDLE hproc = GetCurrentProcess();
+    GetModuleFileNameEx(hproc, 0, g_file_proc, 256);
+    CloseHandle(hproc);
+
+    int n = GetModuleFileName(hinst, g_file_log, 256);
+    while(g_file_log[n] != '\\') n--;
+    #if defined(WIN64)
+      memcpy(g_file_log + n, "\\snapit_x64.log", 5);
+    #else
+      memcpy(g_file_log + n, "\\snapit_x32.log", 5);
+    #endif
+
+    _log_("DllMain | DLL_PROCESS_ATTACH: file = %s", g_file_proc);
 
     WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(g_message_name);
 
@@ -313,7 +329,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 
   if(reason == DLL_PROCESS_DETACH)
   {
-    _log_("  DLL_PROCESS_DETACH\n");
+    _log_("DllMain | DLL_PROCESS_DETACH: file = %s", g_file_proc);
   }
 
   return TRUE;
