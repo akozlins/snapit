@@ -36,13 +36,28 @@ UINT WMU_SNAPIT_UNINSTALL;
 int hook_install();
 int hook_uninstall();
 
-const char* g_title = "SnapIt";
+#if defined(WIN64)
+const char* g_mutex_name = "MUTEX_SNAPIT_x64_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
+const char* g_message_name = "WMU_SNAPIT_UNINSTALL_x64_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
+const char* g_class_name = "SnapIt_x64_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
+const char* g_title = "SnapItX64";
+const char* g_icon_name = "snapit_x64.ico";
+#else
+const char* g_mutex_name = "MUTEX_SNAPIT_x32_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
+const char* g_message_name = "WMU_SNAPIT_UNINSTALL_x32_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
+const char* g_class_name = "SnapIt_x32_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
+const char* g_title = "SnapItX32";
+const char* g_icon_name = "snapit_x32.ico";
+#endif
+
+NOTIFYICONDATA g_idata;
 HICON g_icon = 0;
 
 const UINT WMU_TRAYICON = WM_USER + 1;
 const UINT ID_MENU_INSTALL   = 0xFF00 + 1;
 const UINT ID_MENU_UNINSTALL = 0xFF00 + 2;
-const UINT ID_MENU_EXIT      = 0xFF00 + 3;
+const UINT ID_MENU_HIDE      = 0xFF00 + 3;
+const UINT ID_MENU_EXIT      = 0xFF00 + 4;
 HMENU g_menu = 0;
 
 HWND hwndEdit = 0;
@@ -57,7 +72,7 @@ void hook_install_()
 void hook_uninstall_()
 {
   EnableMenuItem(g_menu, ID_MENU_UNINSTALL, MF_GRAYED);
-  SendMessageTimeout(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0, SMTO_NORMAL, 250, NULL);
+  SendMessageTimeout(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0, SMTO_NORMAL, 500, NULL);
   hook_uninstall();
   EnableMenuItem(g_menu, ID_MENU_INSTALL, MF_ENABLED);
 }
@@ -70,7 +85,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
     case WM_LBUTTONUP:
       SetForegroundWindow(hwnd);
-//      ShowWindow(hwnd, SW_SHOW);
+      ShowWindow(hwnd, SW_SHOW);
       break;
     case WM_RBUTTONUP:
       SetForegroundWindow(hwnd);
@@ -85,6 +100,9 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         break;
       case ID_MENU_UNINSTALL:
         hook_uninstall_();
+        break;
+      case ID_MENU_HIDE:
+        Shell_NotifyIcon(NIM_DELETE, &g_idata);
         break;
       case ID_MENU_EXIT:
         PostMessage(hwnd, WM_CLOSE, 0, 0);
@@ -110,6 +128,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     switch(wp & 0xFFF0)
     {
     case SC_MINIMIZE:
+      Shell_NotifyIcon(NIM_ADD, &g_idata);
       ShowWindow(hwnd, SW_HIDE);
       return 0; break;
     }
@@ -133,23 +152,25 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
 //  freopen("CON", "w", stdout);
 #pragma warning(pop)
 
-  WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(
-    #if defined(WIN64)
-      "WMU_SNAPIT_UNINSTALL_{494e0de4-493b-4d30-9eb5-e7de12b247c0}"
-    #else
-      "WMU_SNAPIT_UNINSTALL_{faa9d599-79d1-4112-ac68-1263a84c1d24}"
-    #endif
-  );
+  HANDLE mutex = CreateMutex(NULL, TRUE, g_mutex_name);
+  if(!mutex) return 0;
 
-  g_icon = (HICON)LoadImage(
-    NULL,
-    #if defined(WIN64)
-      "snapit64.ico",
-    #else
-      "snapit32.ico",
-    #endif
-    IMAGE_ICON, 0, 0, LR_LOADFROMFILE
-  );
+  if(GetLastError() == ERROR_ALREADY_EXISTS)
+  {
+    HWND hwnd = FindWindow(g_class_name, g_title);
+    if(hwnd)
+    {
+      SetForegroundWindow(hwnd);
+      ShowWindow(hwnd, SW_SHOW);
+    }
+    ReleaseMutex(mutex);
+    CloseHandle(mutex);
+    return 0;
+  }
+
+  WMU_SNAPIT_UNINSTALL = RegisterWindowMessage(g_message_name);
+
+  g_icon = (HICON)LoadImage(NULL, g_icon_name, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
 
   WNDCLASSEX wc;
   ZeroMemory(&wc, sizeof(wc));
@@ -162,35 +183,37 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
   wc.hCursor       = LoadCursor(0, IDC_ARROW);
   wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
   wc.lpszMenuName  = 0;
-  wc.lpszClassName = g_title;
+  wc.lpszClassName = g_class_name;
   wc.hInstance     = hinst;
   wc.hIconSm       = g_icon;
 
-  if(!RegisterClassEx(&wc)) return 0;
+  RegisterClassEx(&wc);
 
   HWND hwnd = CreateWindowEx(
     WS_EX_CLIENTEDGE,
-    g_title, g_title,
+    g_class_name, g_title,
     WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
     CW_USEDEFAULT, CW_USEDEFAULT, 640, 480,
     0, 0, hinst, 0);
 
+  ReleaseMutex(mutex);
+
   if(hwnd == 0) return 0;
 
-  NOTIFYICONDATA idata;
-  memset(&idata, 0, sizeof(idata));
-  idata.cbSize = sizeof(idata);
-  idata.hWnd = hwnd;
-  idata.uFlags = NIF_MESSAGE | NIF_ICON;
-  idata.uCallbackMessage = WMU_TRAYICON;
-  idata.hIcon = g_icon;
+  memset(&g_idata, 0, sizeof(g_idata));
+  g_idata.cbSize = sizeof(g_idata);
+  g_idata.hWnd = hwnd;
+  g_idata.uFlags = NIF_MESSAGE | NIF_ICON;
+  g_idata.uCallbackMessage = WMU_TRAYICON;
+  g_idata.hIcon = g_icon;
 
   g_menu = CreatePopupMenu();
-  AppendMenu(g_menu, MF_STRING, ID_MENU_INSTALL, "Install");
+  AppendMenu(g_menu, MF_STRING | MF_GRAYED, ID_MENU_INSTALL, "Install");
   AppendMenu(g_menu, MF_STRING | MF_GRAYED, ID_MENU_UNINSTALL, "Uninstall");
+  AppendMenu(g_menu, MF_STRING, ID_MENU_HIDE, "Hide");
   AppendMenu(g_menu, MF_STRING, ID_MENU_EXIT, "Exit");
 
-  Shell_NotifyIcon(NIM_ADD, &idata);
+  Shell_NotifyIcon(NIM_ADD, &g_idata);
   hook_install_();
 
   MSG msg;
@@ -201,7 +224,8 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
   }
 
   hook_uninstall_();
-  Shell_NotifyIcon(NIM_DELETE, &idata);
+  Shell_NotifyIcon(NIM_DELETE, &g_idata);
 
+  CloseHandle(mutex);
   return 0;
 }
