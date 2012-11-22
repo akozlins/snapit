@@ -49,7 +49,6 @@ const UINT ID_MENU_EXIT      = 0xFF00 + 4;
 HMENU g_menu = 0;
 
 HWND g_hwndEdit = 0;
-volatile long g_lock = 0;
 
 void hook_install_()
 {
@@ -68,39 +67,49 @@ void hook_uninstall_()
   EnableMenuItem(g_menu, ID_MENU_INSTALL, MF_ENABLED);
 }
 
-LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+LRESULT CALLBACK fproc_tray(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-  if(msg == WMU_TRAYICON)
+  switch(lp)
   {
-    switch(lp)
-    {
-    case WM_LBUTTONUP:
-      ShowWindow(hwnd, SW_SHOW);
-      SetForegroundWindow(hwnd);
-      break;
-    case WM_RBUTTONUP:
-      POINT point;
-      GetCursorPos(&point);
+  case WM_LBUTTONUP:
+    ShowWindow(hwnd, SW_SHOW);
+    SetForegroundWindow(hwnd);
+    break;
+  case WM_RBUTTONUP:
+    POINT point;
+    GetCursorPos(&point);
 
-      switch(TrackPopupMenu(g_menu, TPM_RETURNCMD | TPM_NONOTIFY, point.x, point.y, 0, hwnd, NULL))
-      {
-      case ID_MENU_INSTALL:
-        hook_install_();
-        break;
-      case ID_MENU_UNINSTALL:
-        hook_uninstall_();
-        break;
-      case ID_MENU_HIDE:
-        Shell_NotifyIcon(NIM_DELETE, &g_idata);
-        break;
-      case ID_MENU_EXIT:
-        PostMessage(hwnd, WM_CLOSE, 0, 0);
-        break;
-      }
+    switch(TrackPopupMenu(g_menu, TPM_RETURNCMD | TPM_NONOTIFY, point.x, point.y, 0, hwnd, NULL))
+    {
+    case ID_MENU_INSTALL:
+      hook_install_();
+      break;
+    case ID_MENU_UNINSTALL:
+      hook_uninstall_();
+      break;
+    case ID_MENU_HIDE:
+      Shell_NotifyIcon(NIM_DELETE, &g_idata);
+      break;
+    case ID_MENU_EXIT:
+      PostMessage(hwnd, WM_CLOSE, 0, 0);
       break;
     }
-    return 0;
+    break;
   }
+
+  return 0;
+}
+
+struct LogNode
+{
+  LogNode* next;
+  char buffer[1];
+};
+volatile LogNode* head = 0;
+
+LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+  if(msg == WMU_TRAYICON) return fproc_tray(hwnd, msg, wp, lp);
 
   switch(msg)
   {
@@ -131,12 +140,32 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     PostQuitMessage(0);
     break;
   case WM_COPYDATA:
-//    if(IsWindowVisible(hwnd))
     {
       PCOPYDATASTRUCT data = (PCOPYDATASTRUCT)lp;
+      if(data->dwData != COPYDATA_LOG_ID) break;
+
+      LogNode* node = (LogNode*)malloc(sizeof(LogNode) + data->cbData);
+      memcpy(node->buffer, data->lpData, data->cbData);
+
+      do { node->next = (LogNode*)head; }
+      while(InterlockedCompareExchangePointer((volatile PVOID*)&head, node, node->next) != node->next);
+
+      PostMessage(hwnd, WM_USER + 0xFF, 0, 0);
+    }
+    break;
+  case (WM_USER + 0xFF):
+    while(head)
+    {
+      LogNode* node;
+
+      do { node = (LogNode*)head; }
+      while(InterlockedCompareExchangePointer((volatile PVOID*)&head, node->next, node) != node);
+
       int n = GetWindowTextLength(g_hwndEdit);
       SendMessage(g_hwndEdit, EM_SETSEL, n, n);
-      SendMessage(g_hwndEdit, EM_REPLACESEL, 0, (LPARAM)data->lpData);
+      SendMessage(g_hwndEdit, EM_REPLACESEL, 0, (LPARAM)node->buffer);
+
+      free(node);
     }
     break;
   }

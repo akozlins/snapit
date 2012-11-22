@@ -12,3 +12,5 @@ const char* g_class_name = "SnapIt_x32_{494e0de4-493b-4d30-9eb5-e7de12b247c0}";
 const char* g_title = "SnapItX32";
 const char* g_icon_name = "snapit_x32.ico";
 #endif
+
+#define COPYDATA_LOG_ID 0x0A0B0C0D

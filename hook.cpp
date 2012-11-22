@@ -65,7 +65,9 @@ void flog(const char* fmt, ...)
     vfprintf(file, fmt, list);
     va_end(list);
 
-    fprintf(file, "\n");
+    if(lock_i > 0) fprintf(file, " lock_i = %d\n", lock_i);
+    else fprintf(file, "\n");
+
     fclose(file);
   }
   InterlockedExchange(&g_lock_log, 0);
@@ -86,7 +88,7 @@ void flog(const char* fmt, ...)
     buffer[n++] = 0x0A;
     buffer[n++] = 0x00;
   
-    COPYDATASTRUCT data = { 0, sizeof(buffer), buffer };
+    COPYDATASTRUCT data = { COPYDATA_LOG_ID, sizeof(buffer), buffer };
     SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0);
   }
 } // flog
@@ -212,6 +214,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, D
   switch(msg)
   {
   case WM_WINDOWPOSCHANGING:
+    _log_("fproc | WM_WINDOWPOSCHANGING: thread = %d, hwnd = %08X", GetCurrentThreadId(), hwnd);
     if(!state->hwnd)
     {
       state->hwnd = hwnd;
