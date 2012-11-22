@@ -61,6 +61,7 @@ void hook_install_()
 void hook_uninstall_()
 {
   PostMessage(HWND_BROADCAST, WMU_SNAPIT_UNINSTALL, 0, 0);
+  Sleep(500);
 
   EnableMenuItem(g_menu, ID_MENU_UNINSTALL, MF_GRAYED);
   hook_uninstall();
@@ -74,12 +75,10 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     switch(lp)
     {
     case WM_LBUTTONUP:
-      SetForegroundWindow(hwnd);
       ShowWindow(hwnd, SW_SHOW);
+      SetForegroundWindow(hwnd);
       break;
     case WM_RBUTTONUP:
-      SetForegroundWindow(hwnd);
-
       POINT point;
       GetCursorPos(&point);
 
@@ -132,12 +131,11 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     PostQuitMessage(0);
     break;
   case WM_COPYDATA:
-    if(IsWindowVisible(hwnd))
+//    if(IsWindowVisible(hwnd))
     {
-      int n = GetWindowTextLength(g_hwndEdit);
-      SetFocus(g_hwndEdit);
-      SendMessage(g_hwndEdit, EM_SETSEL, n, n);
       PCOPYDATASTRUCT data = (PCOPYDATASTRUCT)lp;
+      int n = GetWindowTextLength(g_hwndEdit);
+      SendMessage(g_hwndEdit, EM_SETSEL, n, n);
       SendMessage(g_hwndEdit, EM_REPLACESEL, 0, (LPARAM)data->lpData);
     }
     break;
@@ -163,8 +161,8 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
     HWND hwnd = FindWindow(g_class_name, g_title);
     if(hwnd)
     {
-      SetForegroundWindow(hwnd);
       ShowWindow(hwnd, SW_SHOW);
+      SetForegroundWindow(hwnd);
     }
     ReleaseMutex(mutex);
     CloseHandle(mutex);

@@ -87,7 +87,7 @@ void flog(const char* fmt, ...)
     buffer[n++] = 0x00;
   
     COPYDATASTRUCT data = { 0, sizeof(buffer), buffer };
-    SendMessage(hwnd, WM_COPYDATA, 0, (LPARAM)&data);
+    SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0);
   }
 } // flog
 
