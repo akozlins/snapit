@@ -100,12 +100,14 @@ LRESULT CALLBACK fproc_tray(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
   return 0;
 }
 
-struct LogNode
+volatile long g_lock_log = 0;
+
+struct log_node
 {
-  LogNode* next;
+  log_node* next;
   char buffer[1];
 };
-volatile LogNode* head = 0;
+log_node* head = 0;
 
 LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -144,11 +146,13 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       PCOPYDATASTRUCT data = (PCOPYDATASTRUCT)lp;
       if(data->dwData != COPYDATA_LOG_ID) break;
 
-      LogNode* node = (LogNode*)malloc(sizeof(LogNode) + data->cbData);
+      log_node* node = (log_node*)malloc(sizeof(log_node) + data->cbData);
       memcpy(node->buffer, data->lpData, data->cbData);
 
-      do { node->next = (LogNode*)head; }
-      while(InterlockedCompareExchangePointer((volatile PVOID*)&head, node, node->next) != node->next);
+      while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1);
+      node->next = head;
+      head = node;
+      InterlockedExchange(&g_lock_log, 0);
 
       PostMessage(hwnd, WM_USER + 0xFF, 0, 0);
     }
@@ -156,10 +160,12 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
   case (WM_USER + 0xFF):
     while(head)
     {
-      LogNode* node;
+      log_node* node;
 
-      do { node = (LogNode*)head; }
-      while(InterlockedCompareExchangePointer((volatile PVOID*)&head, node->next, node) != node);
+      while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1);
+      node = head;
+      head = node->next;
+      InterlockedExchange(&g_lock_log, 0);
 
       int n = GetWindowTextLength(g_hwndEdit);
       SendMessage(g_hwndEdit, EM_SETSEL, n, n);
