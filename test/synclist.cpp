@@ -27,10 +27,10 @@ DWORD WINAPI write(LPVOID data)
     log_node* node = (log_node*)malloc(sizeof(log_node));
     node->data = d;
 
-    while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1);
+    while(InterlockedExchange(&g_lock_log, 1) == 1);
     node->next = head;
     head = node;
-    g_lock_log = 0;
+    InterlockedExchange(&g_lock_log, 0);
 
     s += d;
   }
@@ -47,11 +47,11 @@ DWORD WINAPI read(LPVOID data)
   log_node* node;
   while(!stop || head)
   {
-    while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1);
+    while(InterlockedExchange(&g_lock_log, 1) == 1);
     if(!head) { g_lock_log = 0; continue; }
     node = head;
     head = node->next;
-    g_lock_log = 0;
+    InterlockedExchange(&g_lock_log, 0);
 
     s += node->data;
     free(node);
