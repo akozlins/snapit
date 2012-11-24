@@ -89,7 +89,11 @@ void flog(const char* fmt, ...)
     buffer[n++] = 0x00;
   
     COPYDATASTRUCT data = { COPYDATA_LOG_ID, sizeof(buffer), buffer };
-    SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0);
+    if(!SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0))
+    {
+      DWORD e = GetLastError();
+    }
+    
   }
 } // flog
 
