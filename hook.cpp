@@ -57,7 +57,7 @@ void flog(const char* fmt, ...)
 {
   FILE* file = 0;
   int lock_i = 0;
-  while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1) lock_i++;
+  while(InterlockedExchange(&g_lock_log, 1) == 1) lock_i++;
   if(fopen_s(&file, g_file_log, "a+") == 0 && file)
   {
     va_list list;

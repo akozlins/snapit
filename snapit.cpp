@@ -149,7 +149,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       log_node* node = (log_node*)malloc(sizeof(log_node) + data->cbData);
       memcpy(node->buffer, data->lpData, data->cbData);
 
-      while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1);
+      while(InterlockedExchange(&g_lock_log, 1) == 1);
       node->next = head;
       head = node;
       InterlockedExchange(&g_lock_log, 0);
@@ -162,7 +162,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
       log_node* node;
 
-      while(InterlockedCompareExchange(&g_lock_log, 1, 0) == 1);
+      while(InterlockedExchange(&g_lock_log, 1) == 1);
       node = head;
       head = node->next;
       InterlockedExchange(&g_lock_log, 0);
