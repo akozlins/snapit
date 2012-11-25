@@ -122,7 +122,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       hwnd, NULL, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
     );
     SendMessage(g_hwndEdit, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FIXED_FONT), 0);
-    SendMessage(g_hwndEdit, EM_LIMITTEXT, 1024 * 1024 * 1024, 0);
+    SendMessage(g_hwndEdit, EM_LIMITTEXT, 1024 * 1024, 0);
     break;
   case WM_SIZE:
     MoveWindow(g_hwndEdit, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
@@ -156,7 +156,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
       PostMessage(hwnd, WM_USER + 0xFF, 0, 0);
     }
-    break;
+    return TRUE; break;
   case (WM_USER + 0xFF):
     while(head)
     {
