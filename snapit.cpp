@@ -109,6 +109,13 @@ struct log_node
 };
 log_node* head = 0;
 
+void log_send(HWND hwnd, const char* message)
+{
+  int n = GetWindowTextLength(hwnd);
+  SendMessage(g_hwndEdit, EM_SETSEL, n, n);
+  SendMessage(g_hwndEdit, EM_REPLACESEL, 0, (LPARAM)message);
+}
+
 LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
   if(msg == WMU_TRAYICON) return fproc_tray(hwnd, msg, wp, lp);
@@ -167,9 +174,7 @@ LRESULT CALLBACK fproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       head = node->next;
       InterlockedExchange(&g_lock_log, 0);
 
-      int n = GetWindowTextLength(g_hwndEdit);
-      SendMessage(g_hwndEdit, EM_SETSEL, n, n);
-      SendMessage(g_hwndEdit, EM_REPLACESEL, 0, (LPARAM)node->buffer);
+      log_send(g_hwndEdit, node->buffer);
 
       free(node);
     }
@@ -257,6 +262,12 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
   Shell_NotifyIcon(NIM_ADD, &g_idata);
   hook_install_();
 
+  log_send(g_hwndEdit, "ChangeWindowMessageFilterEx(WM_COPYDATA, MSGFLT_ALLOW)\n");
+  if(!ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, NULL))
+  {
+    log_send(g_hwndEdit, "ERROR: ChangeWindowMessageFilterEx(WM_COPYDATA, MSGFLT_ALLOW) failed\n");
+  }
+    
   MSG msg;
   while(GetMessage(&msg, 0, 0, 0) > 0)
   {

@@ -44,7 +44,11 @@ UINT WMU_SNAPIT_UNINSTALL;
 
 #pragma data_seg(".sdata")
 HHOOK g_hhook = 0;
-volatile long g_lock_log = 0;
+HANDLE g_log_event = 0;
+HANDLE g_log_thread = 0;
+volatile long g_log_lock = 0;
+__int8 g_log_buf[1024 * 64] = { 0 };
+int g_log_head = sizeof(g_log_buf);
 #pragma data_seg()
 #pragma comment(linker, "/section:.sdata,rws")
 
@@ -56,47 +60,68 @@ char g_file_log[256];
 
 void flog(const char* fmt, ...)
 {
-  int lock_i = 0;
-  while(InterlockedExchange(&g_lock_log, 1) == 1) lock_i++;
-  FILE* file = _fsopen(g_file_log, "a", _SH_DENYNO);
-  if(file)
+  char buffer[64];
+
+  va_list list;
+  va_start(list, fmt);
+  int n = vsnprintf_s(buffer, sizeof(buffer) - 2, _TRUNCATE, fmt, list);
+  va_end(list);
+
+  if(n < 0) n = sizeof(buffer) - 3;
+
+  buffer[n++] = 0x0D;
+  buffer[n++] = 0x0A;
+  buffer[n++] = 0x00;
+
+  while(InterlockedExchange(&g_log_lock, 1) == 1);
+  if(g_log_head >= n + (int)sizeof(int))
   {
-    va_list list;
-    va_start(list, fmt);
-    vfprintf(file, fmt, list);
-    va_end(list);
-
-    if(lock_i > 0) fprintf(file, " lock_i = %d\n", lock_i);
-    else fprintf(file, "\n");
-
-    fclose(file);
+    int node = g_log_head;
+    g_log_head -= n;
+    memcpy(g_log_buf + g_log_head, buffer, n);
+    g_log_head -= sizeof(int);
+    *((int*)(g_log_buf + g_log_head)) = node;
+    SetEvent(g_log_event);
   }
-  InterlockedExchange(&g_lock_log, 0);
+  InterlockedExchange(&g_log_lock, 0);
+} // flog
+
+DWORD WINAPI flog_proc(LPVOID)
+{
+  char buffer[64];
+
+  FILE* file = _fsopen(g_file_log, "a", _SH_DENYNO);
 
   HWND hwnd = FindWindow(g_class_name, g_title);
-  if(hwnd)
+  COPYDATASTRUCT data = { COPYDATA_LOG_ID, sizeof(buffer), buffer };
+
+  while(true)
   {
-    char buffer[64];
+    if(WaitForSingleObject(g_log_event, 100) == WAIT_FAILED) break;
 
-    va_list list;
-    va_start(list, fmt);
-    int n = vsnprintf_s(buffer, sizeof(buffer) - 2, _TRUNCATE, fmt, list);
-    va_end(list);
-
-    if(n < 0) n = sizeof(buffer) - 3;
-
-    buffer[n++] = 0x0D;
-    buffer[n++] = 0x0A;
-    buffer[n++] = 0x00;
-  
-    COPYDATASTRUCT data = { COPYDATA_LOG_ID, sizeof(buffer), buffer };
-    if(!SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0))
+    while(InterlockedExchange(&g_log_lock, 1) == 1);
+    if(g_log_head != sizeof(g_log_buf))
     {
-      DWORD e = GetLastError();
+      int node = g_log_head + sizeof(int);
+      g_log_head = *((int*)(g_log_buf + g_log_head));
+      memcpy(buffer, g_log_buf + node, g_log_head - node);
+      InterlockedExchange(&g_log_lock, 0);
+
+      if(file) fprintf(file, buffer);
+
+      SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0);
     }
-    
+    else
+    {
+      ResetEvent(g_log_event);
+      InterlockedExchange(&g_log_lock, 0);
+    }
   }
-} // flog
+
+  if(file) fclose(file);
+
+  return 0;
+}
 
 typedef struct {
   HWND hwnd;
@@ -285,6 +310,11 @@ DLL_EXPORT LRESULT CALLBACK fhook(int code, WPARAM wp, LPARAM lp)
 
 DLL_EXPORT int hook_install()
 {
+  if(g_hhook) return -1;
+
+  g_log_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+  g_log_thread = CreateThread(NULL, 0, flog_proc, NULL, 0, NULL);
+
   _log_("set hook ...");
 
   if(!g_hhook) g_hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, g_hinst, 0);
@@ -295,6 +325,13 @@ DLL_EXPORT int hook_install()
 
 DLL_EXPORT int hook_uninstall()
 {
+  if(g_log_event) CloseHandle(g_log_event);
+  if(g_log_thread)
+  {
+    WaitForSingleObject(g_log_thread, 1000);
+    CloseHandle(g_log_thread);
+  }
+
   if(!g_hhook) return 0;
 
   _log_("remove hook ...");
