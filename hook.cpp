@@ -25,6 +25,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <share.h>
 
 #define STRICT 1
 #define WIN32_LEAN_AND_MEAN 1
@@ -55,10 +56,10 @@ char g_file_log[256];
 
 void flog(const char* fmt, ...)
 {
-  FILE* file = 0;
   int lock_i = 0;
   while(InterlockedExchange(&g_lock_log, 1) == 1) lock_i++;
-  if(fopen_s(&file, g_file_log, "a+") == 0 && file)
+  FILE* file = _fsopen(g_file_log, "a", _SH_DENYNO);
+  if(file)
   {
     va_list list;
     va_start(list, fmt);
