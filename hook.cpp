@@ -43,13 +43,55 @@ UINT WMU_SNAPIT_UNINSTALL;
 #define DX 16
 #define DY 16
 
+#pragma bss_seg(".sudata")
+__int8 g_log_buf[1024 * 64];
+#pragma bss_seg()
+#pragma comment(linker, "/section:.sudata,rws")
+
+struct
+{
+  __int32 nbuf;
+  __int8* buf;
+
+  __int32 head;
+  __int32 tail;
+
+  __int32 read(__int8* data, __int32 n)
+  {
+    if(tail < head)
+    {
+      memcpy(data, buf, nbuf - head);
+      head += nbuf - head; n -= nbuf - head;
+    }
+    memcpy(data, buf, n);
+    head += n;
+
+    return n;
+  }
+
+  __int32 write(const __int8* data, __int32 n)
+  {
+    if(n > nbuf - tail + head - 1) return 0;
+
+    if(n > nbuf - tail)
+    {
+      memcpy(buf + tail, data, nbuf - tail);
+      tail = 0; n -= nbuf - tail;
+    }
+    memcpy(buf + tail, data, n);
+    tail += n;
+
+    return n;
+  }
+} g_log = { sizeof(g_log_buf), g_log_buf, 0, 0 };
+
 #pragma data_seg(".sdata")
 HHOOK g_hhook = 0;
 HANDLE g_log_event = 0;
 HANDLE g_log_thread = 0;
 volatile long g_log_lock = 0;
-__int8 g_log_buf[1024 * 64] = { 0 };
-int g_log_head = sizeof(g_log_buf);
+int g_log_head = 0;
+int g_log_tail = 0;
 #pragma data_seg()
 #pragma comment(linker, "/section:.sdata,rws")
 
@@ -75,42 +117,53 @@ void flog(const char* fmt, ...)
   buffer[n++] = 0x00;
 
   while(InterlockedExchange(&g_log_lock, 1) == 1);
-  if(g_log_head >= n + (int)sizeof(int))
+  while(true)
   {
-    int node = g_log_head;
-    g_log_head -= n;
-    memcpy(g_log_buf + g_log_head, buffer, n);
-    g_log_head -= sizeof(int);
-    *((int*)(g_log_buf + g_log_head)) = node;
+    int n_ = sizeof(g_log_buf) - g_log_tail - sizeof(int);
+    if(n > n_)
+    {
+      if((int)sizeof(int) + n >= g_log_head) break;
+      if(n_ >= 0) *((int*)(g_log_buf + g_log_tail)) = -1;
+      g_log_tail = 0;
+    }
+    *((int*)(g_log_buf + g_log_tail)) = n;
+    g_log_tail += sizeof(int);
+    memcpy(g_log_buf + g_log_tail, buffer, n);
+    g_log_tail += n;
     if(g_log_event) SetEvent(g_log_event);
+    break;
   }
   InterlockedExchange(&g_log_lock, 0);
 } // flog
 
 DWORD WINAPI flog_proc(LPVOID)
 {
-  char buffer[64];
-
   FILE* file = _fsopen(g_file_log, "a", _SH_DENYNO);
-
   HWND hwnd = FindWindow(g_class_name, g_title);
+  char buffer[64];
   COPYDATASTRUCT data = { COPYDATA_LOG_ID, sizeof(buffer), buffer };
 
   while(WaitForSingleObject(g_log_event, 100) != WAIT_FAILED)
   {
     while(InterlockedExchange(&g_log_lock, 1) == 1);
-    while(g_log_head != sizeof(g_log_buf))
+    if(g_log_head == g_log_tail)
     {
-      int node = g_log_head + sizeof(int);
-      g_log_head = *((int*)(g_log_buf + g_log_head));
-      memcpy(buffer, g_log_buf + node, g_log_head - node);
+      ResetEvent(g_log_event);
+      InterlockedExchange(&g_log_lock, 0);
+    }
+    else
+    {
+      if(g_log_head + sizeof(int) > sizeof(g_log_buf)) g_log_head = 0;
+      int n = *((int*)(g_log_buf + g_log_head));
+      if(n == -1) { g_log_head = 0; n = *((int*)(g_log_buf + g_log_head)); }
+      g_log_head += sizeof(int);
+      memcpy(buffer, g_log_buf + g_log_head, n);
+      g_log_head += n;
+      InterlockedExchange(&g_log_lock, 0);
 
       if(file) fprintf(file, buffer);
-
       SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0);
     }
-    ResetEvent(g_log_event);
-    InterlockedExchange(&g_log_lock, 0);
   }
 
   if(file) fclose(file);
