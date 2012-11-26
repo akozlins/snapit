@@ -6,7 +6,7 @@ call "%VS100COMNTOOLS%\..\..\vc\vcvarsall.bat"
 
 del hook.obj
 cl %CLOPTS% /D "WIN32" hook.cpp
-link %LINKOPTS% user32.lib gdi32.lib comctl32.lib psapi.lib /DLL /out:hook_x32.dll hook.obj /MACHINE:X86
+link %LINKOPTS% user32.lib gdi32.lib comctl32.lib psapi.lib advapi32.lib /DLL /out:hook_x32.dll hook.obj /MACHINE:X86
 
 del snapit.obj
 cl %CLOPTS% /D "WIN32" snapit.cpp

@@ -262,7 +262,7 @@ int CALLBACK WinMain(HINSTANCE hinst, HINSTANCE hprev, LPSTR cmd, int show)
   Shell_NotifyIcon(NIM_ADD, &g_idata);
   hook_install_();
 
-  log_send(g_hwndEdit, "ChangeWindowMessageFilterEx(WM_COPYDATA, MSGFLT_ALLOW)\n");
+  log_send(g_hwndEdit, "ChangeWindowMessageFilterEx(WM_COPYDATA, MSGFLT_ALLOW)\r\n");
   if(!ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, NULL))
   {
     log_send(g_hwndEdit, "ERROR: ChangeWindowMessageFilterEx(WM_COPYDATA, MSGFLT_ALLOW) failed\n");

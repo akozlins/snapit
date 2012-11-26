@@ -32,6 +32,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <psapi.h>
+#include <aclapi.h>
 
 #include "snapit.h"
 
@@ -81,7 +82,7 @@ void flog(const char* fmt, ...)
     memcpy(g_log_buf + g_log_head, buffer, n);
     g_log_head -= sizeof(int);
     *((int*)(g_log_buf + g_log_head)) = node;
-    SetEvent(g_log_event);
+    if(g_log_event) SetEvent(g_log_event);
   }
   InterlockedExchange(&g_log_lock, 0);
 } // flog
@@ -95,27 +96,21 @@ DWORD WINAPI flog_proc(LPVOID)
   HWND hwnd = FindWindow(g_class_name, g_title);
   COPYDATASTRUCT data = { COPYDATA_LOG_ID, sizeof(buffer), buffer };
 
-  while(true)
+  while(WaitForSingleObject(g_log_event, 100) != WAIT_FAILED)
   {
-    if(WaitForSingleObject(g_log_event, 100) == WAIT_FAILED) break;
-
     while(InterlockedExchange(&g_log_lock, 1) == 1);
-    if(g_log_head != sizeof(g_log_buf))
+    while(g_log_head != sizeof(g_log_buf))
     {
       int node = g_log_head + sizeof(int);
       g_log_head = *((int*)(g_log_buf + g_log_head));
       memcpy(buffer, g_log_buf + node, g_log_head - node);
-      InterlockedExchange(&g_log_lock, 0);
 
       if(file) fprintf(file, buffer);
 
       SendMessageTimeout(hwnd, WM_COPYDATA, 0, (LPARAM)&data, SMTO_NORMAL, 10, 0);
     }
-    else
-    {
-      ResetEvent(g_log_event);
-      InterlockedExchange(&g_log_lock, 0);
-    }
+    ResetEvent(g_log_event);
+    InterlockedExchange(&g_log_lock, 0);
   }
 
   if(file) fclose(file);
@@ -312,13 +307,42 @@ DLL_EXPORT int hook_install()
 {
   if(g_hhook) return -1;
 
-  g_log_event = CreateEvent(NULL, TRUE, FALSE, NULL);
-  g_log_thread = CreateThread(NULL, 0, flog_proc, NULL, 0, NULL);
+  SID_IDENTIFIER_AUTHORITY sid_world = SECURITY_WORLD_SID_AUTHORITY;
+  PSID sid = NULL;
 
-  _log_("set hook ...");
+  if(!AllocateAndInitializeSid(&sid_world, 1,
+                               SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0,
+                               &sid)) _log_("AllocateAndInitializeSid failed");
+
+  EXPLICIT_ACCESS ea;
+  ZeroMemory(&ea, sizeof(EXPLICIT_ACCESS));
+  ea.grfAccessPermissions = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+  ea.grfAccessMode = SET_ACCESS;
+  ea.grfInheritance = NO_INHERITANCE;
+  ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  ea.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+  ea.Trustee.ptstrName  = (LPTSTR)sid;
+
+  PACL acl = NULL;
+  if(SetEntriesInAcl(1, &ea, NULL, &acl) != ERROR_SUCCESS) _log_("SetEntriesInAcl failed");
+
+  PSECURITY_DESCRIPTOR sd = (PSECURITY_DESCRIPTOR)LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
+  if(!sd) _log_("(PSECURITY_DESCRIPTOR)LocalAlloc failed");
+  if(!InitializeSecurityDescriptor(sd, SECURITY_DESCRIPTOR_REVISION)) _log_("InitializeSecurityDescriptor failed");
+  if(!SetSecurityDescriptorDacl(sd, TRUE, acl, FALSE)) _log_("SetSecurityDescriptorDacl failed");
+
+  SECURITY_ATTRIBUTES sa;
+  sa.nLength = sizeof(sa);
+  sa.lpSecurityDescriptor = sd;
+  sa.bInheritHandle = FALSE;
+
+  g_log_event = CreateEvent(&sa, TRUE, FALSE, g_log_event_name);
+  if(!g_log_event) _log_("CreateEvent failed");
+  g_log_thread = CreateThread(NULL, 0, flog_proc, NULL, 0, NULL);
+  if(!g_log_thread) _log_("CreateThread failed");
 
   if(!g_hhook) g_hhook = SetWindowsHookEx(WH_CALLWNDPROC, fhook, g_hinst, 0);
-  _log_("  hhook = %08X", g_hhook);
+  _log_("SetWindowsHookEx -> %08X", g_hhook);
 
   return (g_hhook ? 0 : -1);
 } // install
@@ -334,7 +358,7 @@ DLL_EXPORT int hook_uninstall()
 
   if(!g_hhook) return 0;
 
-  _log_("remove hook ...");
+  _log_("UnhookWindowsHookEx ...");
   if(UnhookWindowsHookEx(g_hhook))
   {
     g_hhook = 0;
